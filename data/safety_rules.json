@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "status": "TEAM-PROPOSED - requires human review",
+  "rules": [
+    {"id": "live_wire", "label": "Possible live or exposed electrical wire", "terms": ["live wire", "exposed wire", "hanging wire", "wire is sparking", "high-voltage", "high voltage wire", "bijli ka taar", "bijli ka khula taar", "taar se chingari", "current wala taar", "बिजली का खुला तार", "खुला बिजली का तार", "तार से चिंगारी"]},
+    {"id": "open_manhole", "label": "Possible open manhole or drain", "terms": ["open manhole", "missing manhole cover", "open drain", "khula manhole", "manhole khula", "khuli naali", "khula nali", "खुला मैनहोल", "खुला हुआ मैनहोल", "खुली नाली", "खुला नाला"]},
+    {"id": "unsafe_water", "label": "Possible flooding near an electrical hazard", "terms": ["water near live wire", "water is close to a live electric wire", "water close to a live electric wire", "flood water near electric", "paani taar ke paas", "paani bijli ke taar", "पानी बिजली के तार", "तार के पास पानी"]}
+  ]
+}

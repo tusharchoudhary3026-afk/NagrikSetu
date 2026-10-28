@@ -4,6 +4,9 @@ from core import intake, router_baseline, splitter, ownership
 from core.config import COMPLAINTS
 from core.db import insert_complaint, insert_suggestion, fetch_all
 from core.ledger import log_event, history, save_correction
+from core.duplicates import find_candidates, record_decision
+from core.safety import flag_safety
+from core.reviews import submit_review
 
 
 def _save(text, case):
@@ -31,28 +34,35 @@ def test_AT02_vague_asks_and_invents_nothing():
     assert intake.clarification_question(rec)
 
 
-def test_AT03_duplicates_not_built():
-    pytest.skip("Engine 7 (duplicate linking) is not built in V1 scope")
+def test_AT03_similar_candidates_need_a_human_decision(db):
+    first = _save("Garbage dump near Ward 4 market.", "CASE-AT03-A")
+    second = _save("Garbage dump near Ward 9 market.", "CASE-AT03-B")
+    match = next(row for row in find_candidates(first) if row["complaint_id"] == second)
+    assert match["shared_terms"] and match["decision"] == "needs_review"
+    assert fetch_all("SELECT * FROM incident_links") == []
+    record_decision(first, second, "different", "reviewer", "Different ward and incident")
+    assert fetch_all("SELECT * FROM incident_links") == []
+    assert fetch_all("SELECT decision FROM duplicate_reviews")[0]["decision"] == "different"
 
 
 def test_AT04_override_stores_correction(db):
     cid = _save("The streetlight is not working near City Centre.", "CASE-T4")
     with pytest.raises(ValueError):
-        log_event(cid, "edit", "reviewer", final_dept="Roads Dept", reason="", reason_code="wrong_category")
+        submit_review(cid, "reviewer", "edit", "Roads Dept", "", "wrong_category")
     with pytest.raises(ValueError):
-        log_event(cid, "edit", "reviewer", final_dept="Roads Dept", reason="x", reason_code=None)
+        submit_review(cid, "reviewer", "edit", "Roads Dept", "A reason", None)
     first = history(cid)[0]
-    log_event(cid, "edit", "reviewer", suggested_dept="Electricity Dept", final_dept="Roads Dept",
-              reason="Pole is on a road-widening site", reason_code="wrong_category")
-    save_correction(cid, "text", "Electricity Dept", "Roads Dept")
+    submit_review(cid, "reviewer", "edit", "Roads Dept",
+                  "Pole is on a road-widening site", "wrong_category")
     h = history(cid)
     assert [e["event_type"] for e in h] == ["suggested", "edit"]
     assert h[0] == first and h[1]["reason"] and h[1]["suggested_dept"] == "Electricity Dept"
     assert len(fetch_all("SELECT * FROM corrections WHERE complaint_id=?", (cid,))) == 1
 
 
-def test_AT05_safety_not_built():
-    pytest.skip("Engine 8 (safety flagging) is not built in V1 scope")
+def test_AT05_safety_flag_requires_human_attention():
+    result = flag_safety("The exposed live wire is sparking beside the park.")
+    assert result["flagged"] and result["flags"][0]["status"] == "HUMAN_REVIEW_REQUIRED"
 
 
 def test_AT06_language_results_reported():
@@ -75,13 +85,13 @@ def test_AT07_compound_split_and_merge_back(db):
     one = splitter.propose_split("The drain is blocked and the sewer is overflowing near Morar.")
     assert not one["is_compound"]                      # looks compound, one owner: kept intact
     cid = _save(text, "CASE-T7")
-    ids = splitter.confirm_split(cid, "CASE-T7", sp["parts"])
+    ids = splitter.confirm_split(cid, "CASE-T7", sp["parts"], "reviewer")
     assert len(ids) == 2
     with pytest.raises(ValueError):
-        splitter.confirm_split(cid, "CASE-T7", sp["parts"])
-    assert splitter.merge_back(cid) == 2
+        splitter.confirm_split(cid, "CASE-T7", sp["parts"], "reviewer")
+    assert splitter.merge_back(cid, "reviewer") == 2
     with pytest.raises(ValueError):
-        splitter.merge_back(cid)
+        splitter.merge_back(cid, "reviewer")
     assert len(fetch_all("SELECT id FROM complaints WHERE parent_id=?", (cid,))) == 2  # never deleted
 
 

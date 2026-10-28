@@ -1,132 +1,106 @@
-"""Engine 8 - Component 2: Acceptance Tests AT-01 through AT-06 Runner."""
-import json
+"""Small acceptance scenarios using actual service behavior and isolated test storage."""
+import tempfile
+from pathlib import Path
+
 import pandas as pd
-from intake import process, clarification_question, extract_issue, detect_language
-from splitter import propose_split
-from router_baseline import route
-from ledger import save_correction, log_event
+
+from . import db as dbm
+from .auth import verify_permission
+from .challenges import create_challenge, resolve_challenge
+from .config import COMPLAINTS
+from .db import init_db, insert_complaint, insert_suggestion
+from .duplicates import find_candidates
+from .intake import clarification_question, detect_language, process
+from .router_baseline import route
+from .safety import flag_safety
+from .splitter import propose_split
 
 
 def run_at_01_clear_complaint():
-    """AT-01: Clear complaint, known owner -> Correct top suggestion."""
     text = "Large pothole causing traffic jams near Civil Lines main road."
-    res = route(text)
-    top_dept = res["top3"][0]["dept"] if res["top3"] else None
-    passed = top_dept == "Roads & Infrastructure" and not res["abstained"]
-    return {
-        "id": "AT-01",
-        "scenario": "Clear complaint, known owner",
-        "pass_condition": "Correct top suggestion against independently checked label",
-        "status": "PASS" if passed else "FAIL",
-        "details": f"Routed to: {top_dept}, Conf: {res['confidence']}"
-    }
+    result = route(text)
+    dept = result["top3"][0]["dept"] if result["top3"] else None
+    passed = dept == "Roads Dept" and not result["abstained"]
+    return {"id": "AT-01", "scenario": "Clear complaint, known owner",
+            "pass_condition": "Correct top suggestion against current labelled owner",
+            "status": "PASS" if passed else "FAIL", "details": f"Routed to: {dept}"}
 
 
 def run_at_02_vague_complaint():
-    """AT-02: Vague text / missing location -> Ask targeted question or abstain; invent nothing."""
     text = "Fix this problem near my house."
     rec = process(text)
     question = clarification_question(rec)
-    passed = rec["location"] == "unknown" and question is not None
-    return {
-        "id": "AT-02",
-        "scenario": "Vague text / missing location",
-        "pass_condition": "Ask targeted question or abstain; invent nothing",
-        "status": "PASS" if passed else "FAIL",
-        "details": f"Extracted Location: {rec['location']}, Question: {question}"
-    }
+    result = route(text)
+    passed = rec["location"] == "unknown" and rec["issue"] == "unknown" and question and result["abstained"]
+    return {"id": "AT-02", "scenario": "Vague text / missing location",
+            "pass_condition": "Ask a targeted question and abstain without inventing facts",
+            "status": "PASS" if passed else "FAIL", "details": f"Question: {question}; route abstained: {result['abstained']}"}
 
 
 def run_at_03_similar_wording():
-    """AT-03: Similar wording, distinct incidents -> Do not merge; show evidence."""
-    text1 = "Garbage dump near Ward 4 market."
-    text2 = "Garbage dump near Ward 9 bus stand."
-    split1 = propose_split(text1)
-    split2 = propose_split(text2)
-    passed = not split1["is_compound"] and not split2["is_compound"]
-    return {
-        "id": "AT-03",
-        "scenario": "Similar wording, distinct incidents",
-        "pass_condition": "Do not merge; show evidence and allow unlink",
-        "status": "PASS" if passed else "FAIL",
-        "details": f"Text 1 compound: {split1['is_compound']}, Text 2 compound: {split2['is_compound']}"
-    }
+    one = propose_split("Garbage dump near Ward 4 market.")
+    two = propose_split("Garbage dump near Ward 9 bus stand.")
+    passed = not one["is_compound"] and not two["is_compound"]
+    return {"id": "AT-03", "scenario": "Similar wording, distinct incidents",
+            "pass_condition": "No automatic split or duplicate merge",
+            "status": "PASS" if passed else "FAIL", "details": "Each complaint remains an independent case."}
 
 
 def run_at_04_reviewer_override():
-    """AT-04: Reviewer overrides suggestion -> Store correction, reason and prior suggestion."""
+    old_path = dbm.DB_PATH
     try:
-        complaint_id = 9999  # Mock ID for test verification
-        save_correction(complaint_id, "Broken street light", "Roads & Infrastructure", "Electrical")
-        log_event(
-            complaint_id=complaint_id,
-            event_type="edit",
-            actor="reviewer",
-            suggested_dept="Roads & Infrastructure",
-            final_dept="Electrical",
-            reason="Streetlight wiring is handled by Electrical department",
-            reason_code="wrong_category"
-        )
-        passed = True
-    except Exception:
-        passed = False
-    return {
-        "id": "AT-04",
-        "scenario": "Reviewer overrides suggestion",
-        "pass_condition": "Store correction, reason and prior suggestion",
-        "status": "PASS" if passed else "FAIL",
-        "details": "Successfully stored correction and logged edit event with mandatory reason code."
-    }
+        with tempfile.TemporaryDirectory() as temp:
+            dbm.DB_PATH = Path(temp) / "acceptance.db"
+            init_db()
+            rec = {"case_id": "AT04", "parent_id": None, "original_text": "Broken streetlight",
+                   "language": "english", "normalized_text": "broken streetlight", "channel": "portal",
+                   "location": "unknown", "issue": "streetlight", "requested_action": None,
+                   "missing_fields": "location", "is_synthetic": 1}
+            cid = insert_complaint(rec)
+            insert_suggestion(cid, "baseline", [{"dept": "Roads Dept", "score": 1}], {}, 1, 0)
+            challenge = create_challenge(cid, "citizen", "Wrong department")
+            resolve_challenge(challenge, "reviewer", "Electrical team owns streetlights", "edit",
+                              final_dept="Electricity Dept", reason_code="wrong_category")
+            events = dbm.fetch_all("SELECT event_type,suggested_dept,final_dept FROM ledger WHERE complaint_id=? ORDER BY id", (cid,))
+            corrections = dbm.fetch_all("SELECT * FROM corrections WHERE complaint_id=?", (cid,))
+            passed = len(events) == 3 and events[-1]["suggested_dept"] == "Roads Dept" and bool(corrections)
+    except Exception as exc:
+        passed, events, corrections = False, [], []
+        detail = str(exc)
+    finally:
+        dbm.DB_PATH = old_path
+    return {"id": "AT-04", "scenario": "Reviewer overrides suggestion",
+            "pass_condition": "Store correction, reason, and prior suggestion",
+            "status": "PASS" if passed else "FAIL",
+            "details": detail if not passed else "Override and correction saved in isolated database."}
 
 
 def run_at_05_safety_case():
-    """AT-05: Predefined safety case -> Flag for human review under team rubric."""
-    text = "Exposed live high-voltage wire snapping near children's park."
-    res = route(text)
-    issue = extract_issue(text)
-    passed = "streetlight/wire" in issue and not res["abstained"]
-    return {
-        "id": "AT-05",
-        "scenario": "Predefined safety case",
-        "pass_condition": "Flag for human review under team rubric",
-        "status": "PASS" if passed else "FAIL",
-        "details": f"Extracted issue: {issue}, Routed: {res['top3'][0]['dept'] if res['top3'] else 'None'}"
-    }
+    text = "A polite report: an exposed wire is sparking near the park."
+    result = flag_safety(text)
+    passed = result["flagged"] and result["flags"] and result["flags"][0]["status"] == "HUMAN_REVIEW_REQUIRED"
+    return {"id": "AT-05", "scenario": "Predefined safety case",
+            "pass_condition": "Flag for human review under team-proposed rubric",
+            "status": "PASS" if passed else "FAIL", "details": str(result["flags"])}
 
 
 def run_at_06_multilingual():
-    """AT-06: Equivalent English/Hindi/Hinglish case -> Report results by language."""
-    en_text = "Water supply pipe leaking on station road."
-    hi_text = "स्टेशन रोड पर पानी की पाइपलाइन लीक हो रही है।"
-    hing_text = "station road pe paani ka pipe leak ho raha hai."
-
-    res_en = detect_language(en_text)
-    res_hi = detect_language(hi_text)
-    res_hing = detect_language(hing_text)
-
-    passed = (res_en == "english" and res_hi == "hindi" and res_hing == "hinglish")
-    return {
-        "id": "AT-06",
-        "scenario": "Equivalent English/Hindi/Hinglish case",
-        "pass_condition": "Report results by language and investigate errors",
-        "status": "PASS" if passed else "FAIL",
-        "details": f"Detected Languages -> English: {res_en}, Hindi: {res_hi}, Hinglish: {res_hing}"
-    }
+    texts = {"english": "Water supply pipe leaking on Station Road.",
+             "hindi": "स्टेशन रोड पर पानी की पाइपलाइन लीक हो रही है।",
+             "hinglish": "Station Road pe paani ka pipe leak ho raha hai."}
+    detected = {language: detect_language(text) for language, text in texts.items()}
+    labels = pd.read_csv(COMPLAINTS, encoding="utf-8-sig").groupby("language").size().to_dict()
+    passed = all(detected[k] == k and labels.get(k, 0) > 0 for k in texts)
+    return {"id": "AT-06", "scenario": "Equivalent English/Hindi/Hinglish case",
+            "pass_condition": "Report each language with non-zero dataset sample sizes",
+            "status": "PASS" if passed else "FAIL", "details": f"detected={detected}; sample_sizes={labels}"}
 
 
 def run_all_acceptance_tests():
-    """Executes the full acceptance test suite (AT-01 through AT-06)."""
-    return [
-        run_at_01_clear_complaint(),
-        run_at_02_vague_complaint(),
-        run_at_03_similar_wording(),
-        run_at_04_reviewer_override(),
-        run_at_05_safety_case(),
-        run_at_06_multilingual(),
-    ]
+    return [run_at_01_clear_complaint(), run_at_02_vague_complaint(), run_at_03_similar_wording(),
+            run_at_04_reviewer_override(), run_at_05_safety_case(), run_at_06_multilingual()]
 
 
 if __name__ == "__main__":
-    results = run_all_acceptance_tests()
-    for r in results:
-        print(f"[{r['status']}] {r['id']}: {r['scenario']} -> {r['details']}")
+    for result in run_all_acceptance_tests():
+        print(f"[{result['status']}] {result['id']}: {result['scenario']} -> {result['details']}")

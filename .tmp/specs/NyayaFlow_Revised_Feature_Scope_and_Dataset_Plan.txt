@@ -1,0 +1,819 @@
+NyayaFlow | Revised feature scope + dataset requirements
+Page 1
+ AI SYNERGY HACKATHON 2026
+ GOVERNANCE CASE
+ NyayaFlow
+ Explainable Grievance Routing &amp; Accountability Assistant
+REVISED FEATURE SCOPE + DATASET REQUIREMENTS
+Updated planning document incorporating scope corrections, safer human-review controls, evidence discipline, realistic
+evaluation and a prioritised build plan.
+Core differentiator: identify possible sub-issues within one complaint, keep them linked under one case, surface
+ownership conflicts, and record consequential human decisions.
+Selected case: One Complaint, Five Departments
+Team: [Enter team name] &nbsp;&nbsp; Members: [Enter names] &nbsp;&nbsp; Institution: [Enter institution]
+Status legend
+Status
+Meaning
+BUILD — planned
+Must be implemented and demonstrated before claimed as working. Status here is a plan, not proof code exists.
+MOCK
+Fake data, stub or simulated integration. Label it clearly in UI and submission.
+ROADMAP
+Pitch/architecture only; not working V1.
+NEW
+Added to improve case fit or differentiation.
+REMOVED
+Explicitly excluded from V1.
+Non-negotiable: no automatic rejection, closure, deprioritisation or duplicate merging. Every dataset and
+simulated result must be labelled accurately; every metric is a target until measured.
+
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 2
+1. Case framing and corrections
+Case context
+The case describes grievances arriving through at least four channels and partially separate workflows, complaints in
+English/Hindi/Hinglish, generic status labels, and a simulated finding that 23% of grievances were reassigned at least once.
+This does not establish that 23% were misrouted or explain why reassignment occurred.
+Selected problem statement
+How might municipal grievance teams identify and separate multiple issues within one complaint, recommend
+responsible departments with grounded evidence, handle unclear or overlapping ownership, and maintain an
+auditable human-reviewed decision trail?
+Alternative framings considered
+Framing
+Why it matters
+Why not selected alone
+A. Incorrect initial routing
+May reduce avoidable transfers.
+Reassignment is not proof of misrouting; causes need
+verification.
+B. Duplicate detection
+May surface reports about the same incident.
+Similar wording/location can describe distinct incidents.
+C. Generic status updates
+May improve transparency.
+Does not solve issue splitting or ownership conflicts
+alone.
+D. Multi-issue handling + ownership
+conflicts (selected)
+Best fit to the case title; connects splitting, routing,
+clarification and auditability.
+Needs labelled examples and verified or explicitly
+assumed ownership rules.
+Evidence labels required in the submission
+ CASE EVIDENCE: facts supplied in the hackathon case.
+ 
+ EXTERNAL EVIDENCE: public documents/datasets with citations and limitations.
+ 
+ ASSUMPTION: unverified premise, especially department ownership rules.
+ 
+ UNKNOWN: currently unavailable information, such as actual duplicate rate, reassignment causes or API access.
+ 
+Differentiation: do not position NyayaFlow as just a chatbot, status tracker or plain classifier. The planned value is
+compound-issue handling + ownership review + abstain-and-ask + auditable correction + measured evaluation.
+Five corrections to preserve
+ Never describe the 23% reassignment figure as a 23% misrouting rate.
+ 
+ Do not claim no Indian municipal dataset exists unless a documented search supports it; describe the synthetic dataset as the
+ prototype plan.
+ Do not claim another platform lacks voice, language or status features without current primary-source evidence.
+ 
+ Do not claim accuracy, fairness, savings or a real pilot before measurement. Report denominators and limitations.
+ 
+ BUILD means planned scope until implemented and tested; MOCK is simulated; ROADMAP is not implemented; REMOVED is
+ out of V1.
+
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 3
+2. ENGINE 1 — Complaint Intake & Understanding
+Status: BUILD (core planned pipeline; not a claim of completed implementation)
+#
+Feature / requirement
+Status
+Scope note
+1
+Text intake in Hindi, English and Hinglish
+BUILD
+Core demo path
+2
+Preserve original complaint text untouched
+BUILD
+Never overwrite original
+3
+Language/style detection
+BUILD
+Allow uncertain/mixed result
+4
+Hinglish normalisation / transliteration
+BUILD
+Separate normalised field
+5
+Issue extraction
+BUILD
+Evidence-linked
+6
+Location / ward / landmark extraction
+BUILD
+Keep unknown if absent
+7
+Requested-action extraction
+BUILD
+Do not infer missing facts
+8
+Missing-information detection
+BUILD
+Required-field rules
+9
+One targeted clarification question
+BUILD
+Never invent facts
+10
+Channel tag: portal / phone / social / in-person
+BUILD
+Data field only
+11
+Staff-assisted intake form
+BUILD
+Manual fallback
+12
+Voice transcription
+MOCK
+Pre-typed transcript only
+13
+Photo attachment
+MOCK
+Store only; no image analysis
+14
+Citizen confirmation of extracted details
+MOCK
+Unless implemented
+end-to-end
+Dataset and design requirements
+ Create 100–200 fictional complaints across English, Hindi and Hinglish, covering selected civic categories. Tag every record
+ SYNTHETIC.
+ L3Cube-HingCorpus/HingBERT and LinCE are language research resources; check access/licensing. They are not labelled
+ municipal-routing datasets by themselves.
+ AI4Bharat IndicXlit/indic-trans is a transliteration resource, not a complaint dataset. Preserve original and normalised text
+ separately.
+ NYC 311 can be an external English-language wording reference only; do not transfer its agency assignments to Indian cities.
+ 
+ Do not state that no suitable Indian dataset exists unless you document the search and its scope.
+ 
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 4
+3. ENGINE 2 — Compound Complaint Splitter
+Status: BUILD — highest-priority differentiator for the selected case
+#
+Feature / requirement
+Status
+Scope note
+15
+Detect possible multi-issue complaints
+BUILD
+Core case feature
+16
+Extract candidate sub-issues
+BUILD
+Ground in text
+17
+Link sub-issues under shared case ID
+BUILD
+Keep parent complaint
+18
+Suggest lead department for case
+BUILD / thin
+Rule-based proposal
+19
+Human confirm/edit/merge-back split
+BUILD
+Human owns final split
+20
+Keep unclear complaint intact and flag it
+BUILD
+No forced split
+Dataset requirements
+ At least 30–40 of the 100–200 synthetic complaints should contain 2+ labelled issues with independently checked owners.
+ 
+ Include negative examples that look compound but describe one issue; measure false splits as well as missed splits.
+ 
+ Keep parent case and sub-issue histories linked. Do not assume every issue requires a different department.
+ 
+4. ENGINE 3 — Explainable Routing + Abstain-and-Ask
+Status: BUILD (main routing hypothesis under test)
+#
+Feature / requirement
+Status
+Scope note
+21
+Keyword/rule-based baseline router
+BUILD
+Build before ML
+22
+TF-IDF + Logistic Regression router
+BUILD
+Compare fairly
+23
+Multilingual embedding router
+BUILD / conditional
+Only if feasible
+24
+LLM-assisted extraction comparison
+MOCK / optional
+Not core routing
+25
+Top-3 department suggestions + evidence
+BUILD
+Traceable support
+26
+Confidence score
+BUILD
+Not automatically calibrated
+27
+Low confidence → abstain/ask/manual queue
+BUILD / NEW
+No forced guess
+28
+Manual-review queue
+BUILD
+Uncertain cases visible
+29
+No auto-close/reject/finalise guard
+BUILD
+Hard safeguard
+Dataset requirements
+ Define department labels from public citizen-charter/department-function documents from one selected city where possible;
+ record source for each rule.
+ Open311 can inform category naming; CPGRAMS categories are context, not automatically local ownership rules.
+ 
+ A teammate who did not author a complaint should assign labels. Double-label a sample if possible.
+ 
+ Keep near-duplicates/related cases on the same side of the train/test split.
+ 
+ Compare baseline and models on the same frozen test set; do not assume embeddings will outperform the baseline.
+ 
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 5
+5. ENGINE 4 — Ownership-Conflict Checker
+Status: BUILD (thin version; rules must be traceable)
+#
+Feature / requirement
+Status
+Scope note
+30
+Issue type → owner responsibility table
+BUILD
+Source every rule
+31
+Flag overlapping ownership
+BUILD / NEW
+Flag, do not decide
+32
+Show rule supporting each owner
+BUILD / NEW
+Grounded explanation
+33
+Detect A → B → A transfer pattern
+BUILD / NEW
+Pattern flag only
+34
+Flag repeat reassignment
+BUILD
+No blame attribution
+35
+Lead-department proposal for overlap
+MOCK
+Not an assignment
+36
+Cross-department shared review thread
+MOCK
+Stub/demo only
+Dataset requirements
+ Build a table for about 10–15 issue types and 4–6 departments from public documents of one city where possible.
+ 
+ Record source URL/title and basis for each rule. If not confirmed by an authorised official, mark ASSUMPTION.
+ 
+ Create synthetic transfer histories with deliberate A → B → A loops and plausible overlap cases.
+ 
+6. ENGINE 5 — Duplicate & Incident Candidate Linking
+Status: BUILD (thin support module; never a decision-maker)
+#
+Feature / requirement
+Status
+Scope note
+37
+Text similarity (TF-IDF / embeddings)
+BUILD
+Candidate signal only
+38
+Location proximity match
+BUILD
+Handle missing location
+39
+Time-window match
+BUILD
+Configurable window
+40
+Candidate list with match evidence
+BUILD
+Explain each match
+41
+Same-place/different-incident guard
+BUILD / NEW
+Critical false-positive test
+42
+Human confirm or unlink
+BUILD
+Human decision
+43
+Incident cluster map
+MOCK
+Not core proof
+44
+Automatic duplicate merge
+REMOVED
+Never without human
+confirmation
+Dataset requirements
+ Create about 20 true duplicate pairs and 20 look-alike-but-distinct pairs, including same street/different day or incident.
+ 
+ Use fictional ward/street names or appropriately licensed public map data; label invented locations MOCK.
+ 
+ Evaluate duplicate precision/recall on labelled pairs. Similarity is not proof of same incident.
+ 
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 6
+7. ENGINE 6 — Safety-Review Flagging
+Status: BUILD (rule-based flags for human attention only)
+#
+Feature / requirement
+Status
+Scope note
+45
+Editable safety rubric (e.g., open manhole/live wire)
+BUILD
+Team-proposed rubric
+46
+Alert flagged cases to review queue
+BUILD
+Human attention
+47
+Store rubric in editable config
+BUILD
+Version changes
+48
+Test low-volume, high-consequence cases
+BUILD
+Include calm wording
+49
+Sentiment-based urgency scoring
+REMOVED
+Distress ≠ danger
+Dataset requirements
+ Label the rubric as team-proposed unless an authorised official verifies it.
+ 
+ Create 10–15 synthetic safety cases in English, Hindi and Hinglish; include calm/polite descriptions.
+ 
+ Report recall on the predefined test set and its sample size. A flag is not a final risk or priority decision.
+ 
+8. ENGINE 7 — Human Review & Decision Ledger
+Status: BUILD — essential accountability proof
+#
+Feature / requirement
+Status
+Scope note
+50
+Accept / edit / clarify / escalate reviewer actions
+BUILD
+Human controls outcome
+51
+Require override reason
+BUILD
+Structured reason + note
+52
+Require transfer reason code
+BUILD / NEW
+No silent transfer
+53
+Log suggestion, evidence, decision, timestamp
+BUILD
+Per-case ledger
+54
+Append-only decision history
+BUILD
+Never overwrite old event
+55
+Staff 'Challenge this route' action
+BUILD / NEW
+Creates review request
+56
+Reviewer resolves challenge and logs outcome
+BUILD
+Trace resolution
+57
+Citizen-side challenge path
+MOCK
+Prototype only
+58
+Save corrections as labelled examples
+BUILD
+No automatic retraining
+59
+Retrain model from corrections
+ROADMAP
+Future work
+60
+Tamper-evident hash-chained ledger
+ROADMAP
+Do not claim in V1
+Transfer reason codes: wrong category  missing information  overlapping ownership  duplicate report  other (free text).
+ Seed demo with clearly labelled simulated reviewer decisions, including an intentional model mistake corrected by a human.
+ 
+ Corrections must add a history entry; never erase the original recommendation or decision.
+ 
+ An ordinary append-only table is not a cryptographically tamper-proof ledger. Hash-chaining stays ROADMAP unless
+ implemented and tested.
+
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 7
+9. ENGINE 8 — Evaluation & Fairness Harness
+Status: BUILD — evaluation is part of the product
+#
+Feature / requirement
+Status
+Scope note
+61
+Frozen held-out split with leakage guard
+BUILD
+Group related cases
+62
+Baseline vs proposed system on same test set
+BUILD
+Fair comparison
+63
+Top-1 routing accuracy
+BUILD
+Show numerator/denominator
+64
+Abstention and coverage-vs-accuracy
+BUILD
+Show trade-off
+65
+Language-wise error gap + sample sizes
+BUILD
+EN / HI / Hinglish
+66
+Hard cases: compound, vague, missing location, sarcasm, overlap
+BUILD
+Predefine cases
+67
+Duplicate precision/recall
+BUILD
+Labelled pairs
+68
+Safety-case recall
+BUILD
+Predefined test set
+69
+Acceptance test runner AT-01 to AT-06
+BUILD
+Record actual pass/fail
+70
+Staff routing pilot, with/without suggestions
+CONDITIONAL
+Only real consenting
+participants
+71
+Failure Gallery
+MOCK
+Show limitations
+72
+Label every simulated result
+BUILD
+Visible SIMULATED label
+Acceptance tests — fill results only after real runs
+ID
+Scenario
+Pass condition
+AT-01
+Clear complaint, known owner
+Correct top suggestion against independently checked label
+AT-02
+Vague text / missing location
+Ask targeted question or abstain; invent nothing
+AT-03
+Similar wording, distinct incidents
+Do not merge; show evidence and allow unlink
+AT-04
+Reviewer overrides suggestion
+Store correction, reason and prior suggestion
+AT-05
+Predefined safety case
+Flag for human review under team rubric
+AT-06
+Equivalent English/Hindi/Hinglish case
+Report results by language and investigate errors
+With only 100–200 synthetic complaints, results are preliminary prototype evidence—not proof of real-world
+performance or statistically established fairness. Show sample sizes and limitations.
+
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 8
+10. ENGINE 9 — Grounded Explanation & Trust Layer
+Status: BUILD (deterministic explanations from structured evidence)
+#
+Feature / requirement
+Status
+Scope note
+73
+Highlight complaint words/location supporting suggestion
+BUILD
+Must exist in input
+74
+Check explanation against complaint/rule table
+BUILD / NEW
+Reject unsupported snippets
+75
+Reason codes for each recommendation
+BUILD
+Consistent taxonomy
+76
+Counterfactual note after real model re-run
+MOCK
+Do not imply unrun test
+77
+Citizen 'Why this department?' card
+MOCK
+Template from ledger
+78
+Free-text LLM explanations
+REMOVED
+Risk of invented reasons
+ No external dataset required; test evidence against the complaint text and responsibility table. Use deterministic templates, not
+ free-form invented justifications.
+11. ENGINE 10 — Reassignment Analytics
+Status: BUILD (thin analytics based on the decision ledger)
+#
+Feature / requirement
+Status
+Scope note
+79
+Per-case reassignment timeline
+BUILD
+From logged events
+80
+Breakdown by reassignment reason
+BUILD / NEW
+Counts + denominators
+81
+Ownership Gap Report by department pair
+BUILD / NEW
+Simulated until real data
+82
+Deadline/delay alerts
+MOCK
+Fictional deadlines labelled
+83
+Emerging hotspot detection
+ROADMAP
+Out of V1
+84
+What-if policy simulator
+ROADMAP
+Out of V1
+ Generate synthetic transfer histories and label every chart SIMULATED. Transfer counts do not prove avoidability or
+ departmental fault; define avoidable reassignment and require human review before reporting it.
+12. Dashboard, audit, privacy and integration
+#
+Feature / requirement
+Status
+Scope note
+85
+Inbox with channel/language tags
+BUILD
+Synthetic records
+86
+Review screen: original, fields, suggestions, evidence
+BUILD
+Keep original visible
+87
+Compound complaint split view
+BUILD
+Parent + sub-issues
+88
+Duplicate candidate panel
+BUILD
+Evidence + unlink
+89
+Ownership-conflict banner
+BUILD
+Show rule/source
+90
+Case replay timeline
+BUILD / NEW
+Suggestion → decision → transfers
+→ challenge
+91
+Evaluation dashboard
+BUILD
+Metrics, sample sizes,
+SIMULATED
+92
+Staff-assisted intake
+BUILD
+Manual fallback
+93
+Operator/reviewer/auditor role toggle
+MOCK
+UI only, not authentication
+94
+Timestamped decision history
+BUILD
+From ledger
+95
+Exportable audit report
+MOCK
+Unless genuinely implemented
+96
+Overridden-suggestion report
+BUILD
+Include reasons
+97
+Operator anomaly detection
+ROADMAP
+No V1 claims
+98
+Encryption in transit/at rest
+ROADMAP
+Do not claim implemented
+99
+Full RBAC/authentication
+REMOVED
+Role toggle is demo-only
+100
+Mask names/phone numbers in UI
+BUILD
+Use fictional data
+101
+Minimal personal-data collection
+BUILD
+Design rule
+102
+Retention and secure deletion
+ROADMAP
+Before real deployment
+
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 9
+#
+Feature / requirement
+Status
+Scope note
+103
+No analysis of unrelated private conversations
+BUILD
+Design rule
+104
+Live municipal/CPGRAMS integration
+REMOVED
+Mock integration only
+105
+Open311-style routing API endpoint
+MOCK
+Stub unless live
+106
+Low-bandwidth UI
+MOCK / conditional
+Only claim if tested
+107
+Hindi/English UI toggle
+MOCK / conditional
+Distinct from Hinglish input
+108
+Save/resume and offline use
+ROADMAP
+Not V1
+
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 10
+13. Master dataset plan and recommended build order
+Dataset shopping list
+Resource
+Purpose
+Caution / status
+Synthetic complaints (100–200)
+Routing, splitting, ambiguity, language and safety
+Team-generated; tag SYNTHETIC
+Responsibility table (10–15 issue types ×
+4–6 departments)
+Routing labels and ownership conflicts
+Public city documents; uncertain rules =
+ASSUMPTION
+L3Cube-HingCorpus / HingBERT; LinCE
+Hinglish/code-switching research
+Check licences; not municipal labels
+AI4Bharat IndicXlit / indic-trans
+Hindi ↔ Roman transliteration
+Resource, not dataset; check terms
+NYC 311 Open Data
+English complaint wording / agency mapping proxy
+External, non-Indian; do not transfer owner rules
+Open311 service-type standard
+Civic category naming
+Taxonomy, not local authority
+City citizen charter / department-function
+documents
+Local owner labels
+Record URLs and source rules
+Duplicate/look-alike pairs (~20 each)
+Duplicate precision/recall
+Synthetic and human-labelled
+Transfer histories + reason codes
+Bounce detection and analytics
+Synthetic; include A→B→A loops
+Safety rubric + 10–15 test cases
+Rule-based safety recall
+Team-proposed unless officially verified
+Dataset construction sequence
+ Choose 8–10 department categories and 10–15 issue types from a selected city's public charter/function documents; save
+ sources.
+ Build responsibility table with owner, overlap, source and verification status; mark uncertain rules ASSUMPTION.
+ 
+ Write 100–200 fictional complaints across English, Hindi and Hinglish; include clear, compound, vague, missing-location,
+ sarcasm and unusual spelling cases; add 10–15 safety cases.
+ Have a teammate who did not write each complaint label owner(s), sub-issues and ambiguity. Double-label a sample if
+ possible.
+ Create about 20 true duplicate pairs and 20 look-alike pairs; add synthetic transfer histories with reason codes.
+ 
+ Group related/near-identical records before splitting. Freeze test data before model tuning.
+ 
+ Record actual test results, sample sizes, failures and limitations; never fill results with planned or fabricated numbers.
+ 
+Recommended build order
+ 1. Synthetic dataset + sourced responsibility table first.
+ 
+ 2. Rule-based baseline + evaluation harness; freeze test split.
+ 
+ 3. Intake/extraction with original-text preservation.
+ 
+ 4. Compound splitter and human confirmation/merge-back.
+ 
+ 5. Human review actions, append-only ledger and transfer reason codes.
+ 
+ 6. TF-IDF router; add multilingual embeddings only if feasible and comparable.
+ 
+ 7. Dashboard: split view, evidence, ownership conflicts and case replay.
+ 
+ 8. Ownership conflict/bounce detection; duplicate candidate guard.
+ 
+ 9. Safety review rubric and queue.
+ 
+ 10. Grounded explanation checks and reassignment analytics.
+ 
+ 11. Everything else remains MOCK or ROADMAP unless implemented and tested.
+ 
+
+NyayaFlow | Revised feature scope + dataset requirements
+Page 11
+14. Round 1 submission checklist and references
+Round 1 is an investigation and planning round; the plan alone is not evidence that a feature has been built.
+Required submission artifacts
+ Case Investigation / Problem-Solution Brief: case, stakeholders, problem, alternatives, evidence labels, assumptions,
+ unknowns, rationale and solution.
+ Basic SRS/implementation plan: users, inputs/outputs, functional and non-functional requirements, human control and failure
+ handling.
+ Genuine AI interaction logs and decision index: prompt/link, model/tool, date, output, what was accepted/changed/rejected,
+ verification and reason.
+ Acceptance tests AT-01 to AT-06 with result fields completed only after actual runs.
+ 
+ Dataset card: source, licence, language, synthetic/public status, labels, split strategy and known limitations.
+ 
+ Team declarations and attribution for reused data, pretrained models, code and assets.
+ 
+Claim and integrity checks
+ Do not turn '23% reassigned at least once' into '23% misrouted'.
+ 
+ Do not claim a dataset, feature or competitor limitation without checking and recording evidence.
+ 
+ Do not claim the system is fair, accurate, faster or cheaper before measuring it.
+ 
+ Do not claim a real staff pilot unless participants actually used the system under a defined procedure; otherwise mark it
+ planned.
+ Do not call synthetic data representative of a city or its residents.
+ 
+ Mark every simulated chart and every mock integration clearly.
+ 
+References to verify and cite in the final submission
+[1] CPGRAMS official portal: https://pgportal.gov.in/ — national grievance-system context, not proof of local municipal features.
+[2] NYC Open Data, 311 Service Requests:
+https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2020-to-Present/erm2-nwe9 — external English-language proxy only.
+[3] Open311 GeoReport v2: https://wiki.open311.org/GeoReport_v2/ — category/protocol reference, not local ownership authority.
+[4] L3Cube-HingCorpus/HingBERT, LinCE and AI4Bharat IndicXlit/indic-trans — verify official project pages, version and licence before use.
+Final rule: separate CASE EVIDENCE, EXTERNAL EVIDENCE, ASSUMPTION and UNKNOWN. Every simulated
+chart must say SIMULATED. Every unimplemented feature must remain MOCK or ROADMAP.

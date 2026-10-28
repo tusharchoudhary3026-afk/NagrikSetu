@@ -11,6 +11,14 @@ LOCATION_PATTERNS = [
     r"[A-Za-z\u0900-\u097F]+(?: [A-Za-z\u0900-\u097F]+)?\s+(?:road|marg|chowk|colony|nagar|lane)",
 ]
 REQUIRED_FIELDS = ["location", "issue"]
+ISSUE_CATEGORIES = [
+    ("Drainage", ("waterlogging", "water logged", "blocked drain", "drain", "nali", "नाली", "sewer", "सीवर", "manhole", "मैनहोल", "paani bhara", "पानी भरा")),
+    ("Electricity", ("streetlight", "street light", "electric wire", "live wire", "hanging wire", "bijli", "बिजली", "स्ट्रीटलाइट", "बिजली का तार")),
+    ("Sanitation", ("garbage", "waste", "kachra", "कचरा", "dustbin", "dead animal", "toilet", "कूड़ेदान")),
+    ("Water supply", ("water supply", "tap", "pipeline", "pipe leak", "paani", "पानी", "नल", "पाइपलाइन")),
+    ("Road damage", ("pothole", "road", "footpath", "sadak", "gadda", "गड्ढा", "सड़क", "फुटपाथ")),
+]
+ISSUE_CLUES = {term for _, terms in ISSUE_CATEGORIES for term in terms}
 
 
 def detect_language(text: str) -> str:
@@ -46,10 +54,27 @@ def extract_location(text: str) -> str:
 
 
 def extract_issue(text: str) -> str:
-    return text.strip().split(".")[0][:120]   # TODO: replace with keyword-based issue label
+    lowered = (text or "").casefold()
+    for category, terms in ISSUE_CATEGORIES:
+        if any(term.casefold() in lowered for term in terms):
+            return category
+    return "unknown"
+
+
+def extract_requested_action(text: str) -> str | None:
+    actions = [("repair", ("repair", "fix", "theek karo", "मरम्मत")),
+               ("clean", ("clean", "remove garbage", "safai", "सफाई")),
+               ("clear", ("clear", "unblock", "saaf", "खोलें")),
+               ("inspect", ("inspect", "check", "jaancha", "जांच"))]
+    lowered = (text or "").casefold()
+    return next((action for action, phrases in actions if any(p.casefold() in lowered for p in phrases)), None)
 
 
 def process(text: str, channel: str = "portal", location_hint: str | None = None) -> dict:
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Complaint text cannot be empty.")
+    if channel not in {"portal", "phone", "social", "in-person"}:
+        raise ValueError("Choose a supported intake channel.")
     loc = location_hint.strip() if location_hint and location_hint.strip() else extract_location(text)
     rec = {
         "original_text": text,
@@ -58,7 +83,7 @@ def process(text: str, channel: str = "portal", location_hint: str | None = None
         "channel": channel,
         "location": loc,
         "issue": extract_issue(text),
-        "requested_action": None,        # TODO: extract (e.g. 'repair', 'clean', 'inspect')
+        "requested_action": extract_requested_action(text),
         "is_synthetic": 1,
     }
     missing = [f for f in REQUIRED_FIELDS if not rec.get(f) or rec[f] == "unknown"]

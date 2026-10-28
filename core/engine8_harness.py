@@ -8,6 +8,7 @@ import math
 import pandas as pd
 from core import router_baseline, router_ml, splitter, ownership
 from core.config import COMPLAINTS
+from core.verify_split import verify_split_leakage, verify_frozen_test_split
 
 def wilson(k, n, z=1.96):
     if n == 0:
@@ -20,10 +21,21 @@ def wilson(k, n, z=1.96):
 
 def evaluate_component_3_and_5(split="test"):
     """Component 3: Baseline vs TF-IDF comparison & Component 5: Language-wise CIs."""
+    if split != "test":
+        raise ValueError("Performance reports must use the frozen held-out test split.")
+    leakage = verify_split_leakage()
+    if not leakage["passed"]:
+        raise ValueError(f"Refusing to score a leaking or invalid split: {leakage}")
+    frozen = verify_frozen_test_split()
+    if not frozen["passed"]:
+        raise ValueError(f"Refusing to score a modified held-out test split: {frozen}")
     df = pd.read_csv(COMPLAINTS, encoding="utf-8-sig")
     tr, va, te = df[df.split == "train"], df[df.split == "val"], df[df.split == split]
+    if tr.empty or va.empty or te.empty:
+        raise ValueError("Train, validation, and held-out test splits must all contain rows.")
     kw = router_baseline.load_keywords()
-    ml = router_ml.fit_default(df)
+    # Fit only on train; tune abstention only on validation; test is used once for reporting.
+    ml = router_ml.fit_default(tr)
     th, curve = router_ml.choose_threshold(ml, va)
     th_used = th if th is not None else 0.40
 

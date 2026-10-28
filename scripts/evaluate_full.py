@@ -42,13 +42,14 @@ def evaluate(split="test"):
     df = pd.read_csv(COMPLAINTS, encoding="utf-8-sig")
     tr, va, te = df[df.split == "train"], df[df.split == "val"], df[df.split == split]
     kw = router_baseline.load_keywords()
-    ml = router_ml.fit_default(df)
+    ml = router_ml.fit_default(tr)
     th, curve = router_ml.choose_threshold(ml, va)
-    th_used = th if th is not None else 0.40
-    res = {"split": split, "n_rows": len(te), "tfidf_threshold": th_used,
-           "threshold_met_target": th is not None, "curve": curve,
+    threshold_met = any(row["coverage"] >= 0.25 and row["answered"] for row in curve)
+    res = {"split": split, "n_rows": len(te), "tfidf_threshold": th,
+           "threshold_met_target": threshold_met, "threshold_source": "validation" if threshold_met else None,
+           "curve": curve,
            "baseline": _row("baseline", te, lambda t: router_baseline.route(t, kw)),
-           "tfidf": _row("tfidf", te, lambda t: ml.route(t, th_used))}
+           "tfidf": _row("tfidf", te, lambda t: ml.route(t, th))}
     # Splitter (Engine 2): missed and false splits
     multi = te[te.owner_label == "MULTI"]
     single = router_ml.single_owner_rows(te)
@@ -80,12 +81,16 @@ def report(r):
              f"false splits {s['false_splits'][0]}/{s['false_splits'][1]}")
     L.append(f"ownership: overlap cases flagged {r['ownership_overlap_flagged'][0]}/{r['ownership_overlap_flagged'][1]}; "
              f"rules still ASSUMPTION {r['assumption_rules'][0]}/{r['assumption_rules'][1]}")
-    L.append(f"tfidf threshold {r['tfidf_threshold']} (chosen on validation; target met: {r['threshold_met_target']})")
+    if r["tfidf_threshold"] is None:
+        L.append("tfidf threshold not selected: validation did not meet minimum coverage; all test predictions abstain")
+    else:
+        L.append(f"tfidf threshold {r['tfidf_threshold']} (chosen on validation; target met: {r['threshold_met_target']})")
     L.append("Labels are AI-written and AI-checked: not independent human labelling.")
     return "\n".join(L)
 
 
 if __name__ == "__main__":
     r = evaluate("test")
-    THRESHOLD_FILE.write_text(json.dumps({"tfidf": r["tfidf_threshold"]}))
+    THRESHOLD_FILE.write_text(json.dumps({"tfidf": r["tfidf_threshold"], "source": r["threshold_source"],
+                                          "validation_target_met": r["threshold_met_target"]}, indent=2) + "\n")
     print(report(r))

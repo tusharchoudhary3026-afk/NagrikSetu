@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 db/nyayaflow.db
 .venv/
+.venv-run/
+data/attachments/
+data/uploads/
+.streamlit/secrets.toml

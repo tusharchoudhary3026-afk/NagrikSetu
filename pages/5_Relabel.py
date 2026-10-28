@@ -47,15 +47,17 @@ import pandas as pd
 import streamlit as st
 from core.config import ROOT, SIM_LABEL
 from core.ui import apply_demo_style, render_hero
+from core.ui import require_permission
 
 SHEET = ROOT / "data" / "relabel_sheet.csv"
+require_permission("can_review")
 OPTIONS = {"Roads": "Roads", "Drainage": "Drainage", "Sanitation": "Sanitation",
            "Electricity": "Electricity", "Water supply": "Water",
            "The complaint clearly names TWO different problems (write both in the note)": "MULTI",
            "Too vague to tell": "UNCLEAR"}
 
 apply_demo_style()
-render_hero("Dataset quality", "Independent relabelling", "Review synthetic complaint labels independently to help assess the dataset.", badge="RELABEL")
+render_hero("Dataset quality", "Independent relabelling", "Review synthetic complaint labels independently to help assess the dataset.")
 st.warning(SIM_LABEL)
 st.caption("For ONE or TWO named team members who did NOT write the complaints. Do not open complaints.csv or the "
            "dataset card. Read each complaint and pick the department that should handle it. Most complaints "

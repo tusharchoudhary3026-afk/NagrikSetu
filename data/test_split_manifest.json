@@ -1,0 +1,7 @@
+{
+  "frozen_on": "2026-10-28",
+  "rows": 27,
+  "families": ["C2", "D3", "E4", "O1", "R3", "R5", "S3", "U1", "W2"],
+  "sha256": "83fbc972c8b714931951393b1814133b8eb449a74361416d1f91b2237e05c837",
+  "hash_method": "SHA-256 of JSON test rows sorted by id with CSV column order, UTF-8, no extra whitespace"
+}

@@ -1,220 +1,216 @@
-"""Shared visual styling for the NyayaFlow Streamlit demo."""
+"""Shared NagrikSetu branding, user bar, and responsive Streamlit styles."""
 import streamlit as st
+
+from .auth import enforce_rbac
 
 
 def apply_demo_style():
+    if st.session_state.get("_nagriksetu_style_rendered"):
+        return
     st.markdown(
         """
         <style>
         :root {
-            --nf-ink: #13243a;
-            --nf-muted: #62748b;
-            --nf-blue: #1c5d91;
-            --nf-teal: #24a89a;
-            --nf-line: #dfe8f0;
-            --nf-paper: #ffffff;
+            --ink: #10253B;
+            --muted: #5B6E82;
+            --navy: #0F2F52;
+            --blue: #1D5C96;
+            --teal: #14958F;
+            --mint: #E4F6F2;
+            --sky: #EAF3FB;
+            --saffron: #F2A33A;
+            --line: #DCE6EF;
+            --paper: #FFFFFF;
+            --font-ui: Inter, "Noto Sans Devanagari", "Segoe UI", system-ui, sans-serif;
+            --hero-gradient: linear-gradient(120deg, var(--navy) 0%, var(--blue) 58%, #0B716D 100%);
         }
+        html, body { font-family: var(--font-ui); }
+        html { font-size: 16px; }
         .stApp {
-            background:
-                radial-gradient(ellipse at 6% 0%, rgba(36,168,154,.09), transparent 36rem),
-                linear-gradient(180deg, #f4f8fb 0%, #f7f9fc 48%, #f1f6f9 100%);
-            color: var(--nf-ink);
+            background: radial-gradient(circle at 7% 0%, rgba(20,149,143,.10), transparent 31rem),
+                        linear-gradient(145deg, #F3F8FC 0%, #EEF7F6 100%);
+            color: var(--ink);
         }
-        .stApp [data-testid="stWidgetLabel"] p,
-        .stApp [data-testid="stWidgetLabel"] label,
-        .stApp label {
-            color: #233c55 !important;
-            opacity: 1 !important;
-        }
-        .stApp [data-testid="stMarkdownContainer"] p,
-        .stApp [data-testid="stMarkdownContainer"] li {
-            color: #233c55;
-        }
-        .stApp [data-testid="stTextAreaRootElement"] {
-            background: #ffffff !important;
-            border: 1px solid #cbd9e5 !important;
-            border-radius: 12px !important;
-        }
-        .stApp [data-testid="stTextAreaRootElement"] textarea,
-        .stApp [data-testid="stTextInputRootElement"] input,
-        .stApp [data-testid="stSelectbox"] [role="combobox"] {
-            color: #172d43 !important;
-            -webkit-text-fill-color: #172d43 !important;
-        }
-        .stApp [data-testid="stTextAreaRootElement"] textarea {
-            background: #ffffff !important;
-        }
-        .stApp [data-testid="stTextInputRootElement"],
-        .stApp [data-testid="stSelectbox"] div:has(> [role="combobox"]) {
-            background: #ffffff !important;
-            border: 1px solid #cbd9e5 !important;
-            border-radius: 12px !important;
-        }
-        .stApp [data-testid="stTextAreaRootElement"] textarea::placeholder,
-        .stApp [data-testid="stTextInputRootElement"] input::placeholder {
-            color: #728398 !important;
-            -webkit-text-fill-color: #728398 !important;
-            opacity: 1;
-        }
-        .stApp section[data-testid="stSidebar"] {
-            background: #f8fbfd !important;
-            border-right: 1px solid #dce7ef !important;
-        }
-        .stApp [data-testid="stSidebarNav"] {
-            width: 100% !important;
-            background: linear-gradient(105deg, #ffffff 0%, #f6fbfd 58%, #eff8f7 100%) !important;
-            border-bottom: 1px solid #cfdee8 !important;
-            box-shadow: 0 8px 24px rgba(19, 48, 72, .10) !important;
-            padding: 10px 22px !important;
-            animation: nf-nav-enter .28s ease-out both;
-        }
-        .stApp [data-testid="stSidebarNavItems"] {
-            display: flex !important; align-items: center; flex-direction: row !important;
-            flex-wrap: wrap; gap: 7px;
-        }
-        .stApp [data-testid="stSidebarNavLinkContainer"] { padding: 0 !important; }
-        .stApp a[data-testid="stSidebarNavLink"] {
-            display: flex !important; align-items: center; gap: 8px;
-            min-height: 44px; padding: 8px 15px !important; margin: 0 3px !important;
-            border: 1px solid #dce7ef !important; border-radius: 13px !important;
-            background: rgba(255,255,255,.82) !important; color: #173a56 !important;
-            font-weight: 700 !important; text-decoration: none !important;
-            box-shadow: 0 2px 6px rgba(19,48,72,.04);
-            transition: background .18s ease, transform .18s ease, box-shadow .18s ease,
-                        border-color .18s ease;
-        }
-        .stApp a[data-testid="stSidebarNavLink"] *,
-        .stApp a[data-testid="stSidebarNavLink"] [data-testid="stMarkdownContainer"] p,
-        .stApp a[data-testid="stSidebarNavLink"] [label] p {
-            color: #173a56 !important; -webkit-text-fill-color: #173a56 !important;
-            opacity: 1 !important; font-size: .92rem; font-weight: 700;
-        }
-        .stApp a[data-testid="stSidebarNavLink"]:hover {
-            background: #e7f4f6 !important; border-color: #afd3dd !important;
-            transform: translateY(-2px); box-shadow: 0 7px 16px rgba(22, 70, 99, .12);
-        }
-        .stApp a[data-testid="stSidebarNavLink"][aria-current="page"] {
-            background: linear-gradient(115deg, #d9f1ec, #e5f4f5) !important;
-            border-color: #9bcfc8 !important; color: #075f63 !important;
-            box-shadow: inset 0 -3px 0 #168b83, 0 4px 12px rgba(8,127,120,.09);
-        }
-        .stApp a[data-testid="stSidebarNavLink"][aria-current="page"] *,
-        .stApp a[data-testid="stSidebarNavLink"][aria-current="page"] [data-testid="stMarkdownContainer"] p,
-        .stApp a[data-testid="stSidebarNavLink"][aria-current="page"] [label] p {
-            color: #075f63 !important; -webkit-text-fill-color: #075f63 !important;
-            opacity: 1 !important;
-        }
-        .stApp [data-testid="stRadio"] input { accent-color: #087f78 !important; }
-        .stApp [data-testid="stAlert"] {
-            color: #263b50 !important;
-            border-radius: 14px;
-        }
-        .stApp [data-testid="stAlert"] p,
-        .stApp [data-testid="stAlert"] span { color: #263b50 !important; }
-        .stApp [data-testid="stAlert"] [data-testid="stMarkdownContainer"] p {
-            color: #263b50 !important;
-        }
-        .stApp [data-testid="stFormSubmitButton"] button,
-        .stApp [data-testid="baseButton-primary"] {
-            background: linear-gradient(110deg, #155b83, #087f78) !important;
-            border: 0 !important; color: #ffffff !important;
-        }
-        .stApp [data-testid="baseButton-primary"] p,
-        .stApp [data-testid="baseButton-primary"] span {
-            color: #ffffff !important;
-        }
-        .block-container { max-width: 1180px; padding-top: 2rem; padding-bottom: 3rem; }
-        h1, h2, h3 { color: var(--nf-ink); letter-spacing: -.025em; }
-        [data-testid="stCaptionContainer"] { color: var(--nf-muted); }
+        header[data-testid="stHeader"] { background: transparent; }
+        .block-container { max-width: 1220px; padding: 1.25rem 1.5rem 3rem; }
+        h1, h2, h3, h4 { color: var(--ink); letter-spacing: -.025em; }
+        h1 { font-size: clamp(1.9rem, 4vw, 3rem); line-height: 1.12; }
+        h2 { font-size: clamp(1.45rem, 3vw, 2rem); }
+        p, li { color: var(--ink); line-height: 1.65; }
+        [data-testid="stCaptionContainer"] p { color: var(--muted); }
         [data-testid="stMetric"] {
-            background: rgba(255,255,255,.86); border: 1px solid var(--nf-line);
-            border-radius: 16px; padding: 15px 18px; box-shadow: 0 5px 18px rgba(20,48,76,.04);
+            background: var(--paper); border: 1px solid var(--line); border-radius: 16px;
+            padding: 14px 18px; box-shadow: 0 5px 18px rgba(16,37,59,.05);
         }
-        [data-testid="stMetricLabel"] { color: var(--nf-muted); }
-        [data-testid="stMetricValue"] { color: var(--nf-ink); }
+        [data-testid="stMetricLabel"] { color: var(--muted); }
+        [data-testid="stMetricValue"] { color: var(--ink); }
         [data-testid="stVerticalBlockBorderWrapper"] > div {
-            border-color: var(--nf-line) !important; border-radius: 18px !important;
-            background: rgba(255,255,255,.82);
+            background: var(--paper); border: 1px solid var(--line) !important;
+            border-radius: 18px !important; box-shadow: 0 7px 22px rgba(16,37,59,.055);
+            transition: transform .18s ease, box-shadow .18s ease;
         }
-        .stButton > button, .stPageLink > a {
-            border-radius: 11px; border: 1px solid #bfd1df !important; font-weight: 650;
-            background: #ffffff !important; color: #173a56 !important;
-            transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+        [data-testid="stVerticalBlockBorderWrapper"] > div:hover {
+            transform: translateY(-2px); box-shadow: 0 12px 26px rgba(16,37,59,.09);
         }
-        .stButton > button:hover, .stPageLink > a:hover {
-            transform: translateY(-1px); border-color: #77a9c8;
-            box-shadow: 0 6px 16px rgba(28,93,145,.12);
+        .stButton > button, .stPageLink > a, [data-testid="stFormSubmitButton"] button {
+            min-height: 44px; padding: .55rem 1rem; border-radius: 12px !important;
+            border: 1px solid var(--line) !important; font-weight: 650;
+            background: var(--paper) !important; color: var(--navy) !important;
+            font-family: var(--font-ui) !important;
+            transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
         }
-        .stButton > button[kind="primary"] {
-            background: linear-gradient(110deg, #155b83, #087f78) !important;
-            border: 0 !important; color: #ffffff !important;
+        .stButton > button:hover, .stPageLink > a:hover,
+        [data-testid="stFormSubmitButton"] button:hover {
+            transform: translateY(-1px); border-color: var(--teal) !important;
+            box-shadow: 0 6px 16px rgba(15,47,82,.12);
         }
-        .stButton > button[kind="primary"] p,
-        .stButton > button[kind="primary"] span {
-            color: #ffffff !important;
+        .stButton > button[kind="primary"],
+        button[kind*="primary"],
+        [data-testid="stBaseButton-primary"],
+        [data-testid="stFormSubmitButton"],
+        [data-testid="stFormSubmitButton"] button[kind="primary"],
+        [data-testid="stFormSubmitButton"] [data-testid="stBaseButton-primary"],
+        [data-testid="stFormSubmitButton"] button,
+        button[data-testid="stFormSubmitButton"],
+        .stFormSubmitButton button,
+        form button[type="submit"],
+        [data-testid="stFormSubmitButton"] button:not(:disabled),
+        [data-testid="stBaseButton-primary"] {
+            background: linear-gradient(120deg, #0F2F52 0%, #1D5C96 58%, #0B716D 100%) !important;
+            background-color: #1D5C96 !important; border: 0 !important; color: #fff !important;
+            -webkit-text-fill-color: #fff !important;
         }
-        .stButton > button:disabled {
-            color: #718196 !important; background: #e7edf2 !important; opacity: 1 !important;
+        .stButton > button[kind="primary"] *,
+        button[kind*="primary"] *,
+        [data-testid="stBaseButton-primary"] *,
+        [data-testid="stFormSubmitButton"] *,
+        [data-testid="stFormSubmitButton"] button[kind="primary"] *,
+        [data-testid="stFormSubmitButton"] [data-testid="stBaseButton-primary"] * { color: #fff !important; }
+        button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible,
+        [role="combobox"]:focus-visible {
+            outline: 3px solid #0B716D !important; outline-offset: 3px !important;
+            box-shadow: 0 0 0 2px #fff !important;
         }
-        [data-testid="stTabs"] button,
-        .stApp [role="tablist"] [role="tab"] {
-            font-weight: 650; color: #35516a !important;
-            border-radius: 11px !important;
+        [data-testid="stTextInputRootElement"], [data-testid="stTextAreaRootElement"],
+        [data-testid="stSelectbox"] div:has(> [role="combobox"]) {
+            background: var(--paper) !important; border: 1px solid #B9C9D7 !important;
+            border-radius: 12px !important;
         }
-        .stApp [role="tablist"] [role="tab"][aria-selected="true"] {
-            color: #075f63 !important; background: #e4f3f1 !important;
+        input, textarea, [role="combobox"] { color: var(--ink) !important; font-family: var(--font-ui); }
+        input::placeholder, textarea::placeholder { color: #52677C !important; opacity: 1; }
+        [data-testid="stIconMaterial"], .material-symbols-rounded, .material-icons {
+            font-family: "Material Symbols Rounded", "Material Icons" !important;
+            font-feature-settings: "liga" !important;
         }
-        @keyframes nf-nav-enter {
-            from { opacity: 0; transform: translateY(-5px); }
-            to { opacity: 1; transform: translateY(0); }
+        button[aria-label="Show password"], button[aria-label="Hide password"],
+        [data-testid="stPasswordInput"] button {
+            min-width: 2.75rem !important; overflow: hidden; color: transparent !important;
+            -webkit-text-fill-color: transparent !important; font-size: 0 !important;
         }
-        @media (prefers-reduced-motion: reduce) {
-            .stApp [data-testid="stSidebarNav"],
-            .stApp a[data-testid="stSidebarNavLink"] {
-                animation: none !important; transition: none !important;
-            }
+        button[aria-label="Show password"]::after,
+        button[aria-label="Hide password"]::after,
+        [data-testid="stPasswordInput"] button::after {
+            content: "◉"; color: var(--navy); -webkit-text-fill-color: var(--navy);
+            font-size: 1rem; line-height: 1;
+        }
+        [data-testid="stFormSubmitButton"] button *,
+        button[data-testid="stFormSubmitButton"] *,
+        .stFormSubmitButton button *, form button[type="submit"] * {
+            color: #fff !important; -webkit-text-fill-color: #fff !important;
+        }
+        [data-testid="stTextInputRootElement"]:has(input[type="password"]) [data-testid="stIconMaterial"] {
+            font-size: 0 !important; line-height: 1 !important;
+        }
+        [data-testid="stTextInputRootElement"]:has(input[type="password"]) [data-testid="stIconMaterial"]::after {
+            content: "◉"; font: 1.05rem/1 var(--font-ui); color: var(--navy);
+        }
+        [data-testid="stAlert"] { border-radius: 14px; }
+        [data-testid="stTabs"] button { min-height: 44px; font-weight: 650; color: var(--navy); }
+        .nf-userbar {
+            display: flex; align-items: center; gap: .55rem; color: var(--ink);
+            font-size: .94rem; font-weight: 650; white-space: nowrap;
+        }
+        .nf-wordmark { color: var(--navy); font-size: 1.15rem; font-weight: 800; letter-spacing: -.03em; }
+        .nf-role-pill {
+            display: inline-flex; align-items: center; min-height: 28px; padding: 2px 11px;
+            border-radius: 999px; background: var(--mint); color: #075A56; font-size: .78rem;
+            font-weight: 750; border: 1px solid #B6E2DB;
         }
         .nf-hero {
-            position: relative; overflow: hidden; border-radius: 24px; padding: 30px 34px;
-            color: #f7fbff; background: linear-gradient(118deg, #112b46 0%, #1c5d81 62%, #168b8a 100%);
-            box-shadow: 0 18px 40px rgba(18,54,80,.16); margin: 4px 0 22px;
+            position: relative; overflow: hidden; border-radius: 22px; padding: clamp(24px, 4vw, 42px);
+            color: #fff; background: var(--hero-gradient); box-shadow: 0 16px 36px rgba(15,47,82,.16);
+            margin: 4px 0 24px;
         }
         .nf-hero:after {
-            content: ''; position: absolute; width: 240px; height: 240px; right: -55px; top: -115px;
-            border: 1px solid rgba(255,255,255,.18); border-radius: 50%;
-            box-shadow: 0 0 0 28px rgba(255,255,255,.045), 0 0 0 58px rgba(255,255,255,.035);
+            content: ''; position: absolute; width: 220px; height: 220px; right: -70px; top: -120px;
+            border: 1px solid rgba(255,255,255,.2); border-radius: 50%;
+            box-shadow: 0 0 0 28px rgba(255,255,255,.045), 0 0 0 58px rgba(255,255,255,.03);
         }
-        .nf-eyebrow { color: #a6dfd9; text-transform: uppercase; letter-spacing: .16em;
-            font-size: .72rem; font-weight: 750; margin-bottom: 10px; }
-        .nf-hero h1 { color: white; font-size: clamp(2rem, 4vw, 3.1rem); line-height: 1.05;
-            margin: 0 0 10px; }
-        .nf-hero p { color: #d8e9f1; max-width: 680px; margin: 0; font-size: 1.02rem; }
-        .nf-hero p, .nf-hero h1, .nf-hero h1 [data-heading-text], .nf-hero strong {
-            color: #ffffff !important; -webkit-text-fill-color: #ffffff !important;
-            opacity: 1 !important;
-        }
-        .nf-hero .nf-eyebrow { color: #b9eee7 !important; }
-        .nf-hero .nf-pill { color: #f3fbff !important; }
-        .nf-pill { display: inline-block; padding: 5px 10px; border-radius: 999px;
-            background: rgba(255,255,255,.13); color: #e8f7f7; font-size: .75rem;
-            font-weight: 700; letter-spacing: .04em; margin-bottom: 18px; }
-        .nf-section-kicker { color: var(--nf-blue); text-transform: uppercase; letter-spacing: .13em;
+        .nf-hero h1 { color: #fff !important; font-size: clamp(2rem, 5vw, 3.2rem); margin: 0 0 12px; }
+        .nf-hero p { color: #fff !important; max-width: 850px; margin: 0; font-size: 1.04rem; }
+        .nf-eyebrow { color: #D8F4F0; text-transform: uppercase; letter-spacing: .14em;
+            font-size: .75rem; font-weight: 800; margin-bottom: 12px; }
+        .nf-section-kicker { color: var(--blue); text-transform: uppercase; letter-spacing: .13em;
             font-size: .72rem; font-weight: 800; margin-bottom: 6px; }
-        .nf-result-title { font-weight: 750; color: var(--nf-ink); font-size: 1.08rem; }
-        .nf-result-sub { color: var(--nf-muted); font-size: .84rem; margin-top: 2px; }
-        .nf-score { font-size: 1.65rem; font-weight: 800; color: var(--nf-blue); line-height: 1.1; }
-        .nf-muted { color: var(--nf-muted); }
+        .nf-score { font-size: 1.65rem; font-weight: 800; color: var(--blue); line-height: 1.1; }
+        .nf-muted { color: var(--muted); }
+        [data-testid="stPageNav"] { background: transparent; }
+        [data-testid="stPageNav"] a { min-height: 44px; border-radius: 11px; font-weight: 650; }
+        [data-testid="stPageNav"] a[aria-current="page"] { background: var(--mint); color: var(--navy); }
+        @media (max-width: 700px) {
+            .block-container { padding: .75rem .85rem 2rem; }
+            [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: .8rem; }
+            [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+                min-width: min(100%, 20rem) !important; flex: 1 1 100% !important;
+            }
+            [data-testid="stPageNav"] { max-width: 100%; overflow-x: visible; flex-wrap: wrap; }
+            .nf-hero { border-radius: 18px; }
+            .nf-userbar { white-space: normal; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
+    st.session_state["_nagriksetu_style_rendered"] = True
 
 
-def render_hero(eyebrow: str, title: str, description: str, badge: str = "ROUND 1 DEMO"):
+def render_userbar(user: dict | None = None):
+    """Render one responsive signed-in bar per Streamlit rerun."""
+    if st.session_state.get("_nagriksetu_userbar_rendered"):
+        return
+    user = user or st.session_state.get("authenticated_user")
+    if not user:
+        return
+    apply_demo_style()
+    left, right, signout = st.columns([5, 3.3, 1.2], vertical_alignment="center")
+    with left:
+        st.markdown('<div class="nf-userbar nf-wordmark">🧭 NagrikSetu</div>', unsafe_allow_html=True)
+    with right:
+        role = "Government" if user.get("role") == "government" else "Public"
+        st.markdown(
+            f'<div class="nf-userbar">{user.get("name", "User")} '
+            f'<span class="nf-role-pill">{role}</span></div>', unsafe_allow_html=True)
+    with signout:
+        if st.button("Sign out", key="nagriksetu_signout", width="stretch"):
+            st.session_state.pop("authenticated_user", None)
+            st.session_state.pop("google_pending_profile", None)
+            try:
+                if getattr(st.user, "is_logged_in", False):
+                    st.logout()
+            except Exception:
+                pass
+            st.rerun()
+    st.divider()
+    st.session_state["_nagriksetu_userbar_rendered"] = True
+
+
+def render_hero(eyebrow: str, title: str, description: str):
     st.markdown(
         f"""
         <section class="nf-hero">
-          <div class="nf-pill">{badge}</div>
           <div class="nf-eyebrow">{eyebrow}</div>
           <h1>{title}</h1>
           <p>{description}</p>
@@ -222,3 +218,25 @@ def render_hero(eyebrow: str, title: str, description: str, badge: str = "ROUND 
         """,
         unsafe_allow_html=True,
     )
+
+
+def require_permission(action: str):
+    """Stop a page when no signed-in account has the required permission."""
+    user = st.session_state.get("authenticated_user")
+    if not user:
+        apply_demo_style()
+        render_hero("Staff access", "Sign in to continue",
+                    "This section is for authorized staff. Sign in from the NagrikSetu overview to continue.")
+        st.info("This staff page requires a signed-in account. Return to NagrikSetu to sign in or create an account.")
+        st.page_link("pages/0_Home.py", label="Go to NagrikSetu sign in", icon="🔐")
+        st.stop()
+    try:
+        enforce_rbac(user.get("role"), action)
+    except PermissionError:
+        apply_demo_style()
+        render_hero("Staff access", "This page isn't available to your account",
+                    f"Your {user.get('role', 'current')} role does not include this action.")
+        st.page_link("pages/0_Home.py", label="Return to NagrikSetu", icon="🏠")
+        st.stop()
+    render_userbar(user)
+    return user

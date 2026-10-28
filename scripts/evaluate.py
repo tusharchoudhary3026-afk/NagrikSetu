@@ -6,9 +6,15 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import pandas as pd
 from core.config import COMPLAINTS, ROOT
 from core import router_baseline, splitter
+from core.verify_split import verify_split_leakage, verify_frozen_test_split
 
 
 def run(split="test", save_failures=False):
+    if split == "test":
+        leakage = verify_split_leakage()
+        frozen = verify_frozen_test_split()
+        if not leakage["passed"] or not frozen["passed"]:
+            raise ValueError(f"Evaluation stopped: invalid grouped/frozen test set. {leakage}; {frozen}")
     df = pd.read_csv(COMPLAINTS, encoding="utf-8-sig")
     df = df[df["split"] == split]
     kw = router_baseline.load_keywords()

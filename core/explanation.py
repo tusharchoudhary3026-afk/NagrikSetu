@@ -1,39 +1,38 @@
-"""Engine 9: Grounded Explanation & Trust Layer (Deterministic explanations from structured evidence)."""
+"""Deterministic explanations grounded in complaint wording and sourced owner rules."""
+import re
+
 import pandas as pd
-from core.config import RESP_TABLE, COMPLAINTS
-from core.db import fetch_all
+
+from .config import RESP_TABLE
+
 
 def load_responsibility_table():
-    """Loads the official responsibility mapping table."""
-    try:
-        return pd.read_csv(RESP_TABLE, encoding="utf-8-sig")
-    except Exception:
-        return pd.DataFrame(columns=["issue", "department", "rule_source"])
+    return pd.read_csv(RESP_TABLE, encoding="utf-8-sig").fillna("")
+
 
 def generate_grounded_explanation(complaint_text: str, suggested_dept: str) -> dict:
-    """Generates a deterministic explanation grounded strictly in complaint text and responsibility rules.
-       Raises a ValueError if explanation cannot be grounded in the input text.
-    """
-    text_lower = complaint_text.lower()
-    
-    # 1. Extract matching words/evidence physically present in the input text
-    words = [w for w in text_lower.split() if len(w) > 3]
-    matched_evidence = [w for w in words if w in text_lower]
-    
-    if not matched_evidence:
-        raise ValueError("Trust Violation: Explanation cannot be grounded—no matching evidence words found in input text.")
-    
-    # 2. Check against responsibility table rules
-    resp_df = load_responsibility_table()
-    matching_rule = resp_df[resp_df["department"].str.lower() == suggested_dept.lower()] if not resp_df.empty else pd.DataFrame()
-    
-    rule_source = matching_rule.iloc[0]["rule_source"] if not matching_rule.empty and "rule_source" in matching_rule.columns else "Standard Municipal Charter Responsibility"
-
-    explanation = {
-        "suggested_department": suggested_dept,
-        "grounded_keywords": list(set(matched_evidence))[:5],  # Top unique matching words
-        "rule_source": rule_source,
-        "trust_status": "VERIFIED_GROUNDED"
-    }
-    
-    return explanation
+    if not (complaint_text or "").strip() or not (suggested_dept or "").strip():
+        raise ValueError("Complaint text and a suggested department are required.")
+    table = load_responsibility_table()
+    required = {"issue_type", "owner", "source", "verification"}
+    if not required.issubset(table.columns):
+        raise ValueError("The responsibility table is missing source or owner fields.")
+    rules = table[table["owner"].astype(str).str.casefold() == suggested_dept.casefold()]
+    text = complaint_text.casefold()
+    for _, rule in rules.iterrows():
+        phrases = [phrase.strip() for phrase in re.split(r"[/,;]", str(rule["issue_type"])) if phrase.strip()]
+        matched = [phrase for phrase in phrases
+                   if re.search(r"(?<!\w)" + re.escape(phrase.casefold()) + r"(?!\w)", text)]
+        if matched:
+            source = str(rule["source"]).strip()
+            if not source:
+                raise ValueError("The matching ownership rule has no traceable source.")
+            return {
+                "suggested_department": suggested_dept,
+                "grounded_keywords": matched,
+                "issue_type": str(rule["issue_type"]),
+                "rule_source": source,
+                "verification": str(rule["verification"] or "UNKNOWN"),
+                "trust_status": "GROUNDED_ASSUMPTION" if str(rule["verification"]).upper() == "ASSUMPTION" else "GROUNDED_RULE",
+            }
+    raise ValueError("No phrase in the responsibility table supports this department from the complaint text.")

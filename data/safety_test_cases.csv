@@ -1,0 +1,13 @@
+id,language,text,expected_flag,tag
+S01,english,"The exposed wire is sparking near the park.",1,SYNTHETIC
+S02,english,"A calm report: an open manhole is beside the bus stop.",1,SYNTHETIC
+S03,english,"Flood water is close to a live electric wire.",1,SYNTHETIC
+S04,english,"There is a hanging wire above the playground.",1,SYNTHETIC
+S05,hindi,"पार्क के पास खुला हुआ मैनहोल है।",1,SYNTHETIC
+S06,hindi,"बिजली का खुला तार सड़क पर लटक रहा है।",1,SYNTHETIC
+S07,hindi,"तार के पास पानी जमा है।",1,SYNTHETIC
+S08,hindi,"नाली का खुला नाला स्कूल के पास है।",1,SYNTHETIC
+S09,hinglish,"Khula manhole bus stop ke paas hai.",1,SYNTHETIC
+S10,hinglish,"Bijli ka khula taar chingari de raha hai.",1,SYNTHETIC
+S11,english,"The streetlight is off and needs a bulb replacement.",0,SYNTHETIC
+S12,hindi,"सड़क पर थोड़ा पानी जमा है, पास में बिजली का तार नहीं है।",0,SYNTHETIC

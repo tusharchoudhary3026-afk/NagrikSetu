@@ -1,13 +1,22 @@
-"""Engine 11 - Component 2: Audit Trail & Ledger Export."""
+"""Downloadable, permission-checked ledger export."""
 import json
-from core.db import fetch_all
+from datetime import datetime, timezone
 
-def generate_audit_export() -> str:
-    """Exports all immutable ledger events into a structured JSON audit string for compliance."""
+from core.auth import enforce_rbac
+from core.db import fetch_all
+from core.privacy import mask_text
+
+
+def generate_audit_export(actor_role: str) -> str:
+    enforce_rbac(actor_role, "can_audit")
     events = fetch_all("SELECT * FROM ledger ORDER BY id ASC")
+    for event in events:
+        if event.get("reason"):
+            event["reason"] = mask_text(event["reason"])
     audit_package = {
-        "system": "NyayaFlow Municipal Audit Export",
+        "system": "NagrikSetu human decision ledger",
+        "exported_at_utc": datetime.now(timezone.utc).isoformat(),
         "total_events": len(events),
-        "events": events
+        "events": events,
     }
-    return json.dumps(audit_package, indent=2)
+    return json.dumps(audit_package, indent=2, ensure_ascii=False)

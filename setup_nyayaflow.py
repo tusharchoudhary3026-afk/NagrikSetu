@@ -1,4 +1,4 @@
-"""NyayaFlow setup: run once from the project root (the folder that contains data/).
+"""NagrikSetu setup: run once from the project root (the folder that contains data/).
     python setup_nyayaflow.py
 Writes all code files to the right places and removes misnamed / misplaced files.
 Does NOT touch anything inside data/."""
@@ -10,10 +10,10 @@ FILES['app.py'] = r'''import streamlit as st
 from core.db import init_db, fetch_all
 from core.config import SIM_LABEL
 
-st.set_page_config(page_title="NyayaFlow", layout="wide")
+st.set_page_config(page_title="NagrikSetu", layout="wide")
 init_db()
 
-st.title("NyayaFlow")
+st.title("NagrikSetu")
 st.caption("Explainable grievance routing and accountability assistant")
 st.warning(SIM_LABEL)
 
@@ -37,7 +37,7 @@ FILES['requirements.txt'] = r'''streamlit>=1.35
 pandas>=2.0
 scikit-learn>=1.4
 '''
-FILES['README.md'] = r'''# NyayaFlow (Round 1 skeleton)
+FILES['README.md'] = r'''# NagrikSetu
 Explainable grievance routing with abstention, human review and an append-only ledger.
 All data is SYNTHETIC. Nothing is auto-closed, auto-rejected or auto-merged.
 
@@ -589,7 +589,7 @@ from core.config import DB_PATH
 init_db()
 print(f"Database ready: {DB_PATH}")
 '''
-FILES['db/schema.sql'] = r'''-- NyayaFlow schema. All demo data is SYNTHETIC.
+FILES['db/schema.sql'] = r'''-- NagrikSetu schema. All demo data is SYNTHETIC.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS complaints (

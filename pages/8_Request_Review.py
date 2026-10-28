@@ -1,38 +1,61 @@
 import json
+
 import streamlit as st
-from core.db import init_db, fetch_all, execute
-from core.ledger import log_event
-from core.config import SIM_LABEL
+
+from core.auth import require_role
+from core.db import init_db
+from core.explanation import generate_grounded_explanation
+from core.portal import list_own_complaints, request_own_review
+from core.privacy import mask_text
 from core.ui import apply_demo_style, render_hero
 
 init_db()
+user = require_role("public")
 apply_demo_style()
-render_hero("For residents", "Request a review", "Ask a person to look again at how your complaint was routed.", badge="CITIZEN")
-st.warning(SIM_LABEL)
+render_hero("Resident portal", "My complaints", "Track your cases and ask an authorized reviewer to look again at a suggestion.")
 
-case_id = st.text_input("Your case ID (for example CASE-1A2B3C)").strip().upper()
-why = st.text_area("What looks wrong or missing?")
-if case_id:
-    found = fetch_all("SELECT id, case_id FROM complaints WHERE case_id=?", (case_id,))
-    if not found:
-        st.error("No case with that ID.")
-    else:
-        cid = found[0]["id"]
-        sug = fetch_all("SELECT * FROM suggestions WHERE complaint_id=? ORDER BY id LIMIT 1", (cid,))
+rows = list_own_complaints(user["id"])
+if not rows:
+    st.info("You have not submitted any complaints yet.")
+    st.page_link("pages/10_Public_Portal.py", label="Submit a complaint", icon="📝")
+else:
+    for row in rows:
         with st.container(border=True):
-            st.markdown("**Why this department?** (facts from the record, not a final decision)")
-            if sug and not sug[0]["abstained"]:
-                top = json.loads(sug[0]["top3"])[0]["dept"]
-                terms = json.loads(sug[0]["evidence"]).get(top, [])
-                st.write(f"The system suggested **{top}**" + (f" because the complaint contains: {', '.join(terms)}." if terms else "."))
-            else:
-                st.write("The system was not sure, so this case waits for a person to decide.")
-            st.caption("A staff member makes the final decision.")
-        if st.button("Send review request", type="primary"):
-            if not why.strip():
-                st.error("Add a short reason first.")
-            else:
-                execute("INSERT INTO challenges (complaint_id, raised_by, reason) VALUES (?,?,?)",
-                        (cid, "citizen", why.strip()))
-                log_event(cid, "challenge", "citizen", reason=why.strip())
-                st.success("Sent to the review queue.")
+            st.subheader(row["case_id"])
+            st.write(mask_text(row["original_text"]))
+            st.caption(f"Submitted {row['created_at']} · location: {row['location'] or 'not provided'}")
+            status = row.get("last_decision") or "Under review"
+            if row.get("open_requests"):
+                status = "Review requested"
+            st.caption(f"Status: {status}")
+            suggestion = None
+            if row.get("top3"):
+                try:
+                    top3 = json.loads(row["top3"])
+                except (TypeError, json.JSONDecodeError):
+                    top3 = []
+                suggestion = top3[0].get("dept") if top3 else None
+            if suggestion and not row.get("abstained"):
+                st.write(f"Preliminary suggestion: **{suggestion}**")
+                try:
+                    explanation = generate_grounded_explanation(row["original_text"], suggestion)
+                    st.caption(f"Why this suggestion: {', '.join(explanation['grounded_keywords'])} matched {explanation['issue_type']}. This is an explanation of the suggestion, not a final decision.")
+                except (ValueError, TypeError):
+                    st.caption("A supported explanation is not available for this suggestion.")
+            elif row.get("abstained"):
+                st.info("No supported suggestion was available. The case remains for staff review.")
+            if row.get("final_dept"):
+                st.write(f"Latest staff decision: **{row['final_dept']}**")
+            if row.get("open_requests"):
+                st.info("A review request is already open for this complaint.")
+                continue
+            with st.form(f"review_request_{row['id']}"):
+                reason = st.text_area("What should staff review?", key=f"review_reason_{row['id']}")
+                submitted = st.form_submit_button("Request human review")
+            if submitted:
+                try:
+                    request_own_review(user["id"], row["id"], reason, user["email"])
+                    st.success("Your request has been sent to authorized staff. It does not change the routing decision.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))

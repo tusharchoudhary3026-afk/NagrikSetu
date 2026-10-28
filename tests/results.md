@@ -1,13 +1,53 @@
-# Acceptance test run 2026-10-27 23:49
+# Acceptance test run 2026-10-28 21:50
 
 | Test | Outcome |
 |---|---|
 | test_AT01_clear_complaint | PASSED |
 | test_AT02_vague_asks_and_invents_nothing | PASSED |
-| test_AT03_duplicates_not_built | SKIPPED |
+| test_AT03_similar_candidates_need_a_human_decision | PASSED |
 | test_AT04_override_stores_correction | PASSED |
-| test_AT05_safety_not_built | SKIPPED |
+| test_AT05_safety_flag_requires_human_attention | PASSED |
 | test_AT06_language_results_reported | PASSED |
 | test_AT07_compound_split_and_merge_back | PASSED |
 | test_AT08_overlap_flagged_with_source | PASSED |
 | test_E6_bounce_pattern | PASSED |
+| test_logged_out_app_shell_keeps_navigation_registered_and_shows_login | PASSED |
+| test_opening_protected_file_page_without_session_shows_sign_in_link | PASSED |
+| test_reviewer_can_open_the_role_filtered_navigation | PASSED |
+| test_email_password_hash_and_verification | PASSED |
+| test_email_login_locks_after_five_failed_attempts | PASSED |
+| test_unverified_government_registration_is_public | PASSED |
+| test_old_username_accounts_are_preserved_as_legacy_during_migration | PASSED |
+| test_public_account_cannot_pass_government_role_check | PASSED |
+| test_public_can_open_portal_but_not_government_page | PASSED |
+| test_public_portal_returns_only_the_owner_cases | PASSED |
+| test_government_email_is_written_as_review_ledger_actor | PASSED |
+| test_photo_validation_size_extension_and_exif_removal | PASSED |
+| test_duplicate_candidate_evidence_and_no_automatic_link | PASSED |
+| test_duplicate_decision_requires_reason_and_preserves_reversible_history | PASSED |
+| test_duplicate_candidate_different_date_is_suppressed_and_scores_are_not_probabilities | PASSED |
+| test_canonical_incident_group_is_shared_across_confirmed_links | PASSED |
+| test_duplicate_candidates_ignore_inactive_split_children | PASSED |
+| test_rbac_denies_unauthorized_and_unknown_roles | PASSED |
+| test_first_account_setup_and_authentication | PASSED |
+| test_active_session_reloads_role_and_invalidates_disabled_accounts | PASSED |
+| test_db_initialization_migrates_preexisting_prototype_tables | PASSED |
+| test_attachment_migration_marks_old_files_plaintext_and_denies_decryption | PASSED |
+| test_attachment_validation_and_review_access | PASSED |
+| test_challenge_resolution_is_audited_and_reason_required | PASSED |
+| test_duplicate_open_challenges_are_rejected | PASSED |
+| test_reassignment_analytics_use_transfer_events_and_correct_timestamp_column | PASSED |
+| test_hotspots_compare_equal_windows_and_label_synthetic_observations | PASSED |
+| test_frozen_test_manifest_matches_the_data_and_rejects_changes | PASSED |
+| test_retraining_stays_idle_until_verified_examples_are_available | PASSED |
+| test_privacy_masks_name_phone_and_email | PASSED |
+| test_audit_export_masks_contacts_and_enforces_read_access | PASSED |
+| test_review_override_is_atomic_and_preserves_previous_suggestion | PASSED |
+| test_safety_rubric_flags_calm_hazard_reports_for_people | PASSED |
+| test_grounded_explanation_needs_text_and_traceable_rule | PASSED |
+| test_split_confirmation_and_merge_back_keep_original_child_history | PASSED |
+| test_only_reviewer_can_confirm_compound_split | PASSED |
+| test_issue_extraction_uses_category_and_abstains_on_generic_text | PASSED |
+| test_speech_transcript_requires_confirmation_and_nonempty_text | PASSED |
+| test_photo_attachments_are_encrypted_at_rest_and_read_only_by_reviewers | PASSED |
+| test_photo_upload_fails_closed_without_encryption_key | PASSED |

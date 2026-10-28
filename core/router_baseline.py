@@ -55,13 +55,8 @@ def route(text: str, kw=None):
             evidence[dept] = hits
             
     if not scores:
-        # Fallback for generic/short inputs so it doesn't just blank out
-        return {
-            "top3": [{"dept": "General Administration", "score": 0.5}],
-            "evidence": {"General Administration": ["default_fallback"]},
-            "confidence": 0.5,
-            "abstained": False
-        }
+        # Unknown complaints stay in manual review; never invent a confident owner.
+        return {"top3": [], "evidence": {}, "confidence": 0.0, "abstained": True}
         
     total = sum(scores.values())
     ranked = sorted(scores.items(), key=lambda x: -x[1])[:3]

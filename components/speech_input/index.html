@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{font:14px system-ui,sans-serif;color:#173a56;margin:0}.box{border:1px solid #cbd9e5;border-radius:14px;padding:14px;background:#fff}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}button,select{border:1px solid #bfd1df;border-radius:10px;background:#fff;color:#173a56;padding:9px 13px;font-weight:650;cursor:pointer}
+button.primary{background:#087f78;color:#fff;border:0}.hint{color:#62748b;margin:8px 0 0}.status{font-weight:650;margin-top:10px}
+</style></head><body><div class="box"><div class="row"><label for="lang">Recognition language</label><select id="lang"><option value="en-IN">English (India)</option><option value="hi-IN">Hindi</option></select>
+<button id="start" class="primary">Start recording</button><button id="stop" disabled>Stop</button><button id="clear">Clear transcript</button></div>
+<div id="status" class="status">Microphone is off. Click Start recording when ready.</div><p class="hint">Trial feature. Mixed Hindi-English recognition quality has not been validated. Audio is handled by your browser's speech recognition provider and is not stored by NagrikSetu.</p></div>
+<script>
+const statusEl=document.getElementById('status'), start=document.getElementById('start'), stop=document.getElementById('stop'), lang=document.getElementById('lang');
+let args={}; let recognition=null; let current='';
+function send(type,value){window.parent.postMessage({isStreamlitMessage:true,type,value},'*')}
+function ready(){send('streamlit:componentReady',{apiVersion:1})}
+function render(e){args=e.data.args||{}; if(args.language)lang.value=args.language; if(!args.enabled){start.disabled=true;statusEl.textContent='Enable the consent checkbox in the app before using the microphone.'}else start.disabled=false;}
+window.addEventListener('message',e=>{if(e.data?.type==='streamlit:render')render(e)});
+document.getElementById('start').onclick=()=>{
+ const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!Speech){statusEl.textContent='Speech recognition is not available in this browser. Type your complaint below.';return}
+ recognition=new Speech(); recognition.lang=lang.value; recognition.interimResults=false; recognition.continuous=true;
+ current=''; recognition.onstart=()=>{start.disabled=true;stop.disabled=false;statusEl.textContent='Listening… Speak clearly. Click Stop when finished.'};
+ recognition.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)current+=e.results[i][0].transcript+' '}statusEl.textContent=current?'Transcript captured. Review it in the editable complaint field below.':'Listening…'};
+ recognition.onerror=e=>{statusEl.textContent='Recognition issue: '+e.error+'. You can type the complaint instead.'};
+ recognition.onend=()=>{start.disabled=!args.enabled;stop.disabled=true;if(current.trim()){send('streamlit:setComponentValue',{transcript:current.trim(),language:lang.value,id:Date.now()});statusEl.textContent='Transcript sent to the editable field. Review it before processing.'}};
+ try{recognition.start()}catch(error){statusEl.textContent='Could not start speech recognition. Type the complaint instead.'}
+};
+stop.onclick=()=>{if(recognition)recognition.stop()};
+document.getElementById('clear').onclick=()=>{current='';statusEl.textContent='Transcript cleared. You can start again or type below.';send('streamlit:setComponentValue',{transcript:'',language:lang.value,id:Date.now()})};
+lang.onchange=()=>{if(recognition)recognition.lang=lang.value};ready();
+</script></body></html>
