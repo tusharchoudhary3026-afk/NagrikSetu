@@ -8,3 +8,7 @@ db/backups/*.db
 data/attachments/
 data/uploads/
 .streamlit/secrets.toml
+.pytest_cache/
+__pycache__/
+.venv/
+.env
