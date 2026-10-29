@@ -3,11 +3,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import streamlit as st
 import pandas as pd
 from scripts.evaluate import run, summary
-from core.config import SIM_LABEL
+from core.config import SIM_LABEL, feature_enabled
 from core.engine8_harness import evaluate_component_3_and_5
 from core.analytics import detect_emerging_hotspots, get_ownership_gap_report, get_reassignment_breakdown
 from core.ui import require_permission
-from core.retraining import run_offline_retraining_experiment
 from core.safety import evaluate_safety_rubric
 
 user = require_permission("can_audit")
@@ -53,24 +52,6 @@ if st.button("Run frozen test evaluation"):
     st.subheader("Potential concentration for staff review")
     st.dataframe(detect_emerging_hotspots(actor_user=user), width="stretch")
 
-st.divider()
-st.subheader("Offline correction experiment")
-st.caption("Only verified labels qualify. The candidate is compared on the frozen test set and is never saved or deployed automatically.")
-if user["role"] == "government" and st.button("Check readiness and run offline experiment"):
-    try:
-        st.session_state["offline_experiment"] = run_offline_retraining_experiment()
-    except ValueError as exc:
-        st.error(str(exc))
-experiment = st.session_state.get("offline_experiment")
-if experiment:
-    if experiment["status"] == "insufficient_verified_examples":
-        st.info(f"Experiment not run: {experiment['verified_examples']} of "
-                f"{experiment['minimum_required']} verified examples available across "
-                f"{len(experiment['departments'])} department labels.")
-    else:
-        st.write({"verified_examples": experiment["verified_examples"],
-                  "departments": experiment["departments"],
-                  "frozen_test_manifest": experiment["test_manifest"],
-                  "model_saved": experiment["model_saved"], "deployed": experiment["deployed"]})
-        st.dataframe([experiment["baseline"], experiment["candidate"]], width="stretch")
-        st.caption("This is an offline experiment only. A reviewer must approve any future model release.")
+if feature_enabled("learning") and user.get("role") in {"reviewer", "auditor", "government"}:
+    st.divider()
+    st.page_link("pages/15_Model_Evaluation.py", label="Open offline model evaluation")

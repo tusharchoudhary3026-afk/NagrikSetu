@@ -1,0 +1,114 @@
+NyayaFlow
+Integrated New Engines (Final Round Edition)
+Engines 11–15 are integrated as part of the project instead of a separate addendum.
+ENGINE 11 — Voice Complaint Intake & Speech-to-Text
+Status: TRY
+Purpose: Allow citizens to file complaints by speaking instead of typing.
+Workflow
+ Citizen taps the microphone button.
+ Speech is converted into editable text.
+ Citizen reviews the transcript before submitting.
+ Existing NyayaFlow NLP pipeline processes the confirmed text.
+Feature
+Status
+Hindi/English/Hinglish voice input
+TRY
+Editable transcript
+BUILD
+Clarification on unclear speech
+BUILD
+Shared routing workflow
+BUILD
+Suggested Tech Stack
+Next.js microphone input, FastAPI backend, Whisper (preferred after testing) or another speech-to-text service.
+ENGINE 12 — Complaint Evidence Attachment
+Status: BUILD
+Purpose: Attach photos to provide visual context without automatic verification.
+Workflow
+ Citizen uploads a photo.
+ FastAPI validates the file.
+ Image is stored privately and linked to the complaint.
+ Reviewer sees the image beside the complaint.
+Feature
+Status
+Camera/gallery upload
+BUILD
+Private storage
+BUILD
+Reviewer evidence viewer
+BUILD
+No image analysis
+BUILD
+Suggested Tech Stack
+Next.js upload, FastAPI, Supabase Storage and PostgreSQL.
+ENGINE 13 — Hotspot Detection
+Status: BUILD
+Purpose: Detect unusual complaint concentration without requiring a GIS map.
+Workflow
+ Group complaints by area, category and time.
+ Compare with a documented baseline.
+ Flag potential hotspots.
+ Display ranked hotspot cards.
+Feature
+Status
+Area trends
+BUILD
+Category increase detection
+BUILD
+\nTime-window comparison
+BUILD
+Hotspot cards
+BUILD
+Synthetic data label
+BUILD
+Suggested Tech Stack
+SQL aggregation, Pandas, PostgreSQL and dashboard cards.
+ENGINE 14 — Citizen Challenge & Review Portal
+Status: BUILD
+Purpose: Allow citizens to question routing decisions while preserving human authority.
+Workflow
+ Citizen requests review.
+ Provides a reason.
+ Reviewer evaluates.
+ Decision history is updated.
+Feature
+Status
+Request Review
+BUILD
+Citizen reason
+BUILD
+Reviewer actions
+BUILD
+History update
+BUILD
+Suggested Tech Stack
+Next.js, FastAPI, PostgreSQL and the existing decision ledger.
+ENGINE 15 — Secure Access & Continuous Learning
+Status: BUILD (phased)
+Purpose: Protect grievance data and improve the routing model through verified corrections.
+Workflow
+ Authenticate users.
+ Grant role-based permissions.
+ Store reviewer corrections.
+ Attempt offline retraining only after enough verified data exists.
+Feature
+Status
+Operator role
+BUILD
+Reviewer role
+BUILD
+Auditor role
+BUILD
+Server-side permissions
+BUILD
+Correction dataset
+BUILD
+Offline retraining
+TRY
+Before/after evaluation
+TRY
+Suggested Tech Stack
+Supabase Auth, Row-Level Security, HTTPS, encrypted storage configuration and offline scikit-learn retraining.
+Implementation Priority
+Finish the core workflow (Engines 1–10), then add photo attachment, citizen review, role permissions, hotspot detection,
+speech-to-text and finally offline retraining.

@@ -1,5 +1,6 @@
 """Engine 1: intake + extraction. Rule-based. Never invents missing facts."""
 import re
+import unicodedata
 
 HINGLISH_WORDS = {"nahi", "hai", "hain", "pe", "par", "mein", "me", "ka", "ki", "ke", "aur", "bhi",
                   "paani", "pani", "sadak", "kachra", "bijli", "nali", "gali", "kab", "kyun"}
@@ -21,6 +22,7 @@ ISSUE_CATEGORIES = [
     ("Road damage", ("pothole", "road", "footpath", "sadak", "gadda", "गड्ढा", "सड़क", "फुटपाथ")),
 ]
 ISSUE_CLUES = {term for _, terms in ISSUE_CATEGORIES for term in terms}
+MAX_COMPLAINT_CHARS = 10_000
 
 
 def detect_language(text: str) -> str:
@@ -42,6 +44,14 @@ def normalize(text: str) -> str:
     """Stored in a SEPARATE field. The original text is never touched."""
     words = re.findall(r"\S+", text.lower())
     return " ".join(NORMALIZE.get(w.strip(".,!?"), w) for w in words)
+
+
+def normalize_location(value: str | None) -> str | None:
+    """Normalize location for matching while keeping the entered value separately."""
+    if value is None:
+        return None
+    canonical = unicodedata.normalize("NFC", value)
+    return re.sub(r"\s+", " ", canonical.strip()).casefold()
 
 
 VAGUE = re.compile(r"\b(my|our|the|this|that|your|mere|meri|mere ghar)\b|\b(house|home|ghar)\b", re.I)
@@ -92,9 +102,11 @@ def extract_requested_action(text: str) -> str | None:
 def process(text: str, channel: str = "portal", location_hint: str | None = None) -> dict:
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Complaint text cannot be empty.")
+    if len(text) > MAX_COMPLAINT_CHARS:
+        raise ValueError(f"Complaint text must be {MAX_COMPLAINT_CHARS:,} characters or fewer.")
     if channel not in {"portal", "phone", "social", "in-person"}:
         raise ValueError("Choose a supported intake channel.")
-    loc = location_hint.strip() if location_hint and location_hint.strip() else extract_location(text)
+    loc = location_hint if location_hint and location_hint.strip() else extract_location(text)
     issue, issue_evidence = extract_issue_evidence(text)
     rec = {
         "original_text": text,
@@ -102,6 +114,7 @@ def process(text: str, channel: str = "portal", location_hint: str | None = None
         "normalized_text": normalize(text),
         "channel": channel,
         "location": loc,
+        "location_normalized": normalize_location(loc),
         "issue": issue,
         "issue_evidence": issue_evidence,
         "requested_action": extract_requested_action(text),

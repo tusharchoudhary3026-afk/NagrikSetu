@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS complaints (
     normalized_text TEXT,                       -- separate field, Hinglish normalisation
     channel         TEXT DEFAULT 'portal',      -- portal | phone | social | in-person
     location        TEXT DEFAULT 'unknown',     -- never invented
+    location_normalized TEXT,                    -- NFC, trimmed/collapsed whitespace, casefolded matching key
     issue           TEXT,
     requested_action TEXT,
     missing_fields  TEXT,                       -- comma-separated
@@ -82,11 +83,24 @@ CREATE TRIGGER IF NOT EXISTS ledger_no_delete
 BEFORE DELETE ON ledger
 BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
 
+CREATE TRIGGER IF NOT EXISTS ledger_no_automatic_final_actions
+BEFORE INSERT ON ledger
+WHEN lower(trim(NEW.event_type)) IN (
+    'close', 'closed', 'closure', 'reject', 'rejected', 'rejection',
+    'deprioritize', 'deprioritise', 'auto_close', 'auto_reject',
+    'auto_deprioritize', 'auto_deprioritise', 'auto_merge', 'merge',
+    'duplicate_merge', 'auto_duplicate_merge'
+)
+BEGIN SELECT RAISE(ABORT, 'automatic complaint final action is prohibited'); END;
+
 CREATE TABLE IF NOT EXISTS challenges (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     complaint_id  INTEGER NOT NULL REFERENCES complaints(id),
     raised_by     TEXT NOT NULL,             -- staff | citizen
     reason        TEXT NOT NULL,
+    reason_category TEXT NOT NULL DEFAULT 'other' CHECK(reason_category IN
+                    ('wrong_department','multiple_issues','missing_context','other')),
+    assigned_reviewer TEXT,
     status        TEXT NOT NULL DEFAULT 'open',   -- open | resolved
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     resolved_by   TEXT,

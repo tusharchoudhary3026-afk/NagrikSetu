@@ -9,6 +9,7 @@ from .auth import enforce_rbac
 from .geo import authorize_staff_complaint, scoped_complaint_ids
 from .geo import STAFF_ROLES
 from .db import fetch_all, get_conn
+from .intake import normalize_location
 
 _TOKEN = re.compile(r"[\w\u0900-\u097f]+", re.UNICODE)
 _STOP = {"the", "and", "for", "near", "this", "that", "with", "from", "road", "at", "on",
@@ -76,8 +77,8 @@ def compare_pair(text_a, text_b, location_a="unknown", location_b="unknown",
     union = words_a | words_b
     shared = sorted(words_a & words_b)
     text_score = len(shared) / len(union) if union else 0.0
-    loc_a = (location_a or "unknown").strip().casefold()
-    loc_b = (location_b or "unknown").strip().casefold()
+    loc_a = normalize_location(location_a) or "unknown"
+    loc_b = normalize_location(location_b) or "unknown"
     location_known = loc_a not in {"", "unknown"} and loc_b not in {"", "unknown"}
     location_match = location_known and loc_a == loc_b
     date_a, date_b = _date(created_a), _date(created_b)
@@ -170,7 +171,7 @@ def find_candidates(complaint_id: int, limit: int = 10, time_window_days: int | 
         raise ValueError("Complaint not found.")
     source = source_rows[0]
     source_words = _tokens(source.get("normalized_text") or source["original_text"])
-    source_location = (source.get("location") or "unknown").strip().casefold()
+    source_location = source.get("location_normalized") or normalize_location(source.get("location")) or "unknown"
     source_date = _date(source.get("created_at"))
     if permitted is None:
         rows = fetch_all("SELECT * FROM complaints WHERE id<>? AND is_active=1 ORDER BY id DESC", (complaint_id,))
@@ -188,7 +189,8 @@ def find_candidates(complaint_id: int, limit: int = 10, time_window_days: int | 
         evidence = compare_pair(
             source.get("normalized_text") or source["original_text"],
             row.get("normalized_text") or row["original_text"],
-            source_location, row.get("location") or "unknown",
+            source_location,
+            row.get("location_normalized") or normalize_location(row.get("location")) or "unknown",
             source.get("created_at"), row.get("created_at"),
             source.get("issue") or "unknown", row.get("issue") or "unknown", window)
         text_score = evidence["text_score"]

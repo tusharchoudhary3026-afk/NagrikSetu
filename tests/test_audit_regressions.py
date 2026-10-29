@@ -74,6 +74,28 @@ def test_ledger_database_triggers_refuse_updates_and_deletes(db):
     assert rows == [{"event_type": "accept", "reason": "human confirmed"}]
 
 
+def test_automatic_final_actions_are_rejected_by_service_and_database(db):
+    from core.ledger import log_event
+
+    complaint_id = insert_complaint({
+        "case_id": "AUDIT-LEDGER-NO-AUTO", "original_text": "Streetlight out", "language": "english",
+        "normalized_text": "streetlight out", "channel": "portal", "location": "unknown",
+        "issue": "Electricity", "is_synthetic": 1,
+    })
+    prohibited = ("close", "reject", "deprioritize", "auto_close", "auto_merge")
+
+    for event_type in prohibited:
+        with pytest.raises(ValueError, match="prohibited"):
+            log_event(complaint_id, event_type, "system")
+        with pytest.raises(sqlite3.IntegrityError, match="automatic complaint final action"):
+            execute(
+                "INSERT INTO ledger (complaint_id,event_type,actor) VALUES (?,?,?)",
+                (complaint_id, event_type, "system"),
+            )
+
+    assert fetch_all("SELECT * FROM ledger WHERE complaint_id=?", (complaint_id,)) == []
+
+
 def test_automatic_final_actions_are_rejected_without_mutation(db, staff_user):
     from core.reviews import submit_review
     reviewer = staff_user("reviewer")
@@ -129,6 +151,24 @@ def test_intake_extracts_devanagari_ward_and_landmark():
 
     assert extract_location("वार्ड 12 में पानी की समस्या है।") == "वार्ड 12"
     assert extract_location("सोमनाथ मार्ग के पास नाली जाम है।") == "सोमनाथ मार्ग"
+
+
+def test_intake_preserves_unicode_and_markup_characters_in_original_text():
+    from core.intake import process
+
+    original = "  <script>alert('x')</script> कचरा 😊 O'Neil & \"Main Road\"\r\n"
+    rec = process(original, location_hint="Gole Ka Mandir")
+    assert rec["original_text"] == original
+    assert rec["location"] == "Gole Ka Mandir"
+    assert rec["normalized_text"] != original
+
+
+def test_duplicate_location_match_uses_normalized_field():
+    from core.duplicates import compare_pair
+
+    evidence = compare_pair("streetlight is broken", "streetlight is broken",
+                            "  Gole   Ka Mandir  ", "gole ka mandir")
+    assert evidence["location_match"] is True
 
 
 def test_intake_issue_extraction_exposes_matched_words():

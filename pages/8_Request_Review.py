@@ -3,6 +3,7 @@ import json
 import streamlit as st
 
 from core.auth import require_role
+from core.config import feature_enabled
 from core.db import init_db
 from core.explanation import generate_grounded_explanation
 from core.portal import list_own_complaints, request_own_review
@@ -49,13 +50,27 @@ else:
             if row.get("open_requests"):
                 st.info("A review request is already open for this complaint.")
                 continue
-            with st.form(f"review_request_{row['id']}"):
-                reason = st.text_area("What should staff review?", key=f"review_reason_{row['id']}")
-                submitted = st.form_submit_button("Request human review")
-            if submitted:
-                try:
-                    request_own_review(user["id"], row["id"], reason, user["email"])
-                    st.success("Your request has been sent to authorized staff. It does not change the routing decision.")
-                    st.rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
+            if row.get("latest_review_status") == "resolved":
+                st.info(f"Last review outcome: {row.get('latest_review_outcome') or 'recorded'} · "
+                        f"{row.get('latest_review_resolution') or 'No resolution note available.'}")
+            if feature_enabled("citizen_review"):
+                with st.form(f"review_request_{row['id']}"):
+                    reason_category = st.selectbox(
+                        "Reason category", ["wrong_department", "multiple_issues", "missing_context", "other"],
+                        format_func=lambda value: {
+                            "wrong_department": "Wrong department",
+                            "multiple_issues": "Multiple issues",
+                            "missing_context": "Missing context",
+                            "other": "Other",
+                        }[value], key=f"review_category_{row['id']}")
+                    reason = st.text_area("What should staff review?", key=f"review_reason_{row['id']}")
+                    submitted = st.form_submit_button("Request routing review")
+                if submitted:
+                    try:
+                        request_own_review(user["id"], row["id"], reason, user["email"], reason_category)
+                        st.success("Your request is pending review. It does not change the routing decision.")
+                        st.rerun()
+                    except (ValueError, PermissionError) as exc:
+                        st.error(str(exc))
+            else:
+                st.info("Routing review requests are temporarily unavailable.")

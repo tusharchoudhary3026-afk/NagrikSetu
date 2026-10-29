@@ -54,8 +54,14 @@ st.divider()
 st.subheader("Active staff area assignments")
 for grant in active_area_assignments(user["email"]):
     key = (grant["state_code"], grant["city_code"], grant["area_code"])
+    if grant["area_code"] == "*":
+        state = options.get(grant["state_code"], {})
+        city = state.get("cities", {}).get(grant["city_code"], {})
+        assignment_label = f"{state.get('name', grant['state_code'])} · {city.get('name', grant['city_code'])} · All areas (city-wide)"
+    else:
+        assignment_label = labels.get(key, "Unknown configured area")
     with st.container(border=True):
-        st.write(f"{grant['name']} · {grant['email']} · {labels.get(key, 'Unknown configured area')}")
+        st.write(f"{grant['name']} · {grant['email']} · {assignment_label}")
         revoke_reason = st.text_input("Reason to revoke or end this assignment", key=f"geo-revoke-reason-{grant['id']}")
         if st.button("Revoke area access", key=f"geo-revoke-{grant['id']}"):
             try:

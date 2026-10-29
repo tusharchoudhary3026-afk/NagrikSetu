@@ -45,9 +45,16 @@ def init_db():
             "is_active": "INTEGER NOT NULL DEFAULT 1",
             "state_code": "TEXT", "state_name": "TEXT", "city_code": "TEXT",
             "city_name": "TEXT", "area_code": "TEXT", "area_name": "TEXT",
+            "location_normalized": "TEXT",
         }.items():
             if name not in complaint_columns:
                 conn.execute(f"ALTER TABLE complaints ADD COLUMN {name} {declaration}")
+        from .intake import normalize_location
+        for row in conn.execute("SELECT id,location FROM complaints WHERE location_normalized IS NULL").fetchall():
+            conn.execute("UPDATE complaints SET location_normalized=? WHERE id=?",
+                         (normalize_location(row["location"]), row["id"]))
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_complaints_location_normalized "
+                     "ON complaints(location_normalized)")
         if "submitted_by" not in complaint_columns:
             conn.execute("ALTER TABLE complaints ADD COLUMN submitted_by INTEGER REFERENCES users(id)")
         attachment_columns = {row["name"] for row in conn.execute("PRAGMA table_info(attachments)")}
@@ -63,10 +70,13 @@ def init_db():
         # Additive migration for databases created by earlier prototype versions.
         challenge_columns = {row["name"] for row in conn.execute("PRAGMA table_info(challenges)")}
         for name, declaration in {
-            "resolved_by": "TEXT", "resolution": "TEXT", "outcome": "TEXT", "resolved_at": "TEXT"
+            "resolved_by": "TEXT", "resolution": "TEXT", "outcome": "TEXT", "resolved_at": "TEXT",
+            "reason_category": "TEXT NOT NULL DEFAULT 'other'", "assigned_reviewer": "TEXT"
         }.items():
             if name not in challenge_columns:
                 conn.execute(f"ALTER TABLE challenges ADD COLUMN {name} {declaration}")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_challenges_open_queue "
+                     "ON challenges(status,reason_category,created_at)")
         correction_columns = {row["name"] for row in conn.execute("PRAGMA table_info(corrections)")}
         for name, declaration in {
             "suggested_dept": "TEXT", "reason": "TEXT", "reason_code": "TEXT",
@@ -98,11 +108,15 @@ def init_db():
 
 
 def insert_complaint(rec: dict, submitted_by: int | None = None) -> int:
+    from .intake import normalize_location
+
     cols = ["case_id", "parent_id", "original_text", "language", "normalized_text",
-            "channel", "location", "issue", "requested_action", "missing_fields", "is_synthetic", "submitted_by",
+            "channel", "location", "location_normalized", "issue", "requested_action", "missing_fields",
+            "is_synthetic", "submitted_by",
             "state_code", "state_name", "city_code", "city_name", "area_code", "area_name"]
     vals = [rec.get(k) for k in cols]
-    vals[11] = submitted_by if submitted_by is not None else rec.get("submitted_by")
+    vals[cols.index("location_normalized")] = normalize_location(rec.get("location"))
+    vals[cols.index("submitted_by")] = submitted_by if submitted_by is not None else rec.get("submitted_by")
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -124,6 +138,46 @@ def insert_suggestion(complaint_id, method, top3, evidence, confidence, abstaine
             "VALUES (?,?,?,?,?,?)",
             (complaint_id, method, json.dumps(top3), json.dumps(evidence), confidence, int(abstained)))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def insert_public_submission(rec: dict, route: dict, submitted_by: int | None = None) -> int:
+    """Persist the complaint, its routing suggestion, and initial ledger event atomically."""
+    import json
+    from .intake import normalize_location
+    from .suggestions import selected_department
+
+    cols = ["case_id", "parent_id", "original_text", "language", "normalized_text",
+            "channel", "location", "location_normalized", "issue", "requested_action", "missing_fields", "is_synthetic",
+            "submitted_by", "state_code", "state_name", "city_code", "city_name", "area_code", "area_name"]
+    vals = [rec.get(key) for key in cols]
+    vals[cols.index("location_normalized")] = normalize_location(rec.get("location"))
+    vals[cols.index("submitted_by")] = submitted_by if submitted_by is not None else rec.get("submitted_by")
+    suggestion = selected_department(route)
+    details = {"abstained": bool(route.get("abstained")),
+               "confidence": route.get("confidence", 0), "synthetic": True,
+               "extracted_issue_evidence": rec.get("issue_evidence", [])}
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute(
+            f"INSERT INTO complaints ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", vals)
+        complaint_id = cur.lastrowid
+        conn.execute(
+            "INSERT INTO suggestions (complaint_id, method, top3, evidence, confidence, abstained) "
+            "VALUES (?,?,?,?,?,?)",
+            (complaint_id, "baseline", json.dumps(route.get("top3") or []),
+             json.dumps(route.get("evidence") or {}), route.get("confidence", 0),
+             int(bool(route.get("abstained")))))
+        conn.execute(
+            "INSERT INTO ledger (complaint_id,event_type,actor,suggested_dept,details) VALUES(?,?,?,?,?)",
+            (complaint_id, "suggested", "system", suggestion, json.dumps(details)))
+        conn.commit()
+        return complaint_id
     except Exception:
         conn.rollback()
         raise

@@ -229,3 +229,60 @@ def test_operator_duplicate_candidates_do_not_query_other_departments(db, staff_
 
     detail = get_staff_case_detail(officer, road)
     assert all(candidate["case_id"] != "DASH-DUP-SANITATION" for candidate in detail["duplicates"])
+
+
+def test_uncertain_languages_compound_duplicate_and_missing_area_remain_visible(db, staff_user):
+    from core import intake, router_baseline
+    from core.db import insert_public_submission
+    from core.geo import approve_area_request, configure_staff_location
+    from core.staff_dashboard import list_staff_cases
+
+    reviewer = staff_user("reviewer", "Grievance Cell")
+    admin = staff_user("reviewer", "Grievance Cell")
+    request = configure_staff_location(reviewer, "mp", "mp-gwalior",
+                                       "mp-gwalior-gole-ka-mandir", "Test reviewer area")
+    approve_area_request(request["request_id"], admin["email"], "Synthetic test approval")
+
+    texts = [
+        "The streetlight is not working in my area",  # English
+        "मेरे इलाके में स्ट्रीटलाइट काम नहीं कर रही है",  # Hindi
+        "mere area mein streetlight kaam nahi kar rahi",  # Hinglish
+        "gibberish xyz 123",  # abstained / manual review
+        "streetlight is off and garbage is piled up",  # compound issue
+        "The streetlight is not working in my area",  # duplicate-looking report remains separate
+    ]
+    expected_ids = []
+    for index, text in enumerate(texts):
+        rec = intake.process(text, "portal", "Gole Ka Mandir")
+        rec.update({"case_id": f"CASE-VARIANT-{index}", "state_code": "mp",
+                    "state_name": "Madhya Pradesh", "city_code": "mp-gwalior",
+                    "city_name": "Gwalior", "area_code": "mp-gwalior-gole-ka-mandir",
+                    "area_name": "Gole Ka Mandir"})
+        expected_ids.append(insert_public_submission(rec, router_baseline.route(text)))
+
+    no_area = intake.process("unclassified report with no location", "portal", "")
+    no_area["case_id"] = "CASE-VARIANT-NO-AREA"
+    no_area_id = insert_public_submission(no_area, router_baseline.route(no_area["original_text"]))
+    no_suggestion_id = insert_complaint({
+        "case_id": "CASE-VARIANT-NO-SUGGESTION", "original_text": "Saved complaint with no routing output",
+        "language": "uncertain", "normalized_text": "saved complaint with no routing output",
+        "channel": "portal", "location": "Gole Ka Mandir", "issue": "unknown", "is_synthetic": 1,
+        "state_code": "mp", "state_name": "Madhya Pradesh", "city_code": "mp-gwalior",
+        "city_name": "Gwalior", "area_code": "mp-gwalior-gole-ka-mandir",
+        "area_name": "Gole Ka Mandir",
+    })
+
+    cases = list_staff_cases(reviewer)
+    visible = {case["id"]: case for case in cases}
+    assert set(expected_ids + [no_area_id, no_suggestion_id]).issubset(visible)
+    assert visible[expected_ids[1]]["original_text"] == texts[1]
+    assert visible[expected_ids[1]]["language"] == "hindi"
+    assert visible[expected_ids[2]]["language"] == "hinglish"
+    assert visible[expected_ids[3]]["uncertain"] is True
+    assert visible[expected_ids[3]]["suggested_department"] is None
+    assert visible[expected_ids[3]]["status"] == "new"
+    assert visible[no_area_id]["location"] == "unknown"
+    assert visible[no_suggestion_id]["uncertain"] is True
+    assert visible[no_suggestion_id]["suggested_department"] is None
+    # Similar reports remain separate records; this dashboard never auto-merges.
+    assert visible[expected_ids[0]]["id"] != visible[expected_ids[5]]["id"]

@@ -8,6 +8,7 @@ from core.auth import (LoginLockedError, authenticate_identifier, begin_public_p
                        verify_staff_registration, staff_directory_preview)
 from core.auth import verify_permission
 from core.db import init_db
+from core.config import feature_enabled
 from core.geo_ui import render_geography_picker
 from core.geo import configure_staff_location, sync_allowlisted_assignments
 from core.geo import is_geography_admin
@@ -76,6 +77,10 @@ if user and user.get("role") == "public":
         _page("pages/5_Relabel.py", "Relabel", "🏷️", visibility="hidden"),
         _page("pages/9_Security.py", "Security status", "🔐", visibility="hidden"),
         _page("pages/12_Area_Access_Admin.py", "Area access requests", "📍", visibility="hidden"),
+        _page("pages/13_Hotspots.py", "Hotspots", "📈", visibility="hidden"),
+        _page("pages/14_Correction_Dataset.py", "Correction dataset", "🧪", visibility="hidden"),
+        _page("pages/15_Model_Evaluation.py", "Model evaluation", "📊", visibility="hidden"),
+        _page("pages/16_Users_Roles.py", "Users & roles", "👥", visibility="hidden"),
     ]
     router = st.navigation(nav_pages, position="top")
 elif user:
@@ -83,8 +88,9 @@ elif user:
     can_audit = verify_permission(user["role"], "can_audit")
     router = st.navigation({
         "Complaints": [
-            _page("pages/0_Home.py", "Dashboard", "🏠", default=True),
-            _page("pages/1_Intake.py", "Complain here", "📝", visibility="hidden"),
+            _page("pages/0_Home.py", "Overview", "🏠", default=True),
+            _page("pages/1_Intake.py", "Complain here", "📝",
+                  visibility="visible" if verify_permission(user["role"], "can_intake") else "hidden"),
             _page("pages/6_Inbox.py", "Inbox", "📥", visibility="visible" if can_audit else "hidden"),
             _page("pages/10_Public_Portal.py", "Submit & track", "📝", visibility="hidden"),
             _page("pages/8_Request_Review.py", "My complaints", "🙋", visibility="hidden"),
@@ -102,6 +108,14 @@ elif user:
                   visibility="visible" if verify_permission(user["role"], "can_view_security") else "hidden"),
             _page("pages/12_Area_Access_Admin.py", "Area access requests", "📍",
                   visibility="visible" if can_review and is_geography_admin(user.get("email", "")) else "hidden"),
+            _page("pages/13_Hotspots.py", "Hotspots", "📈",
+                  visibility="visible" if feature_enabled("hotspots") and verify_permission(user["role"], "can_view_hotspots") else "hidden"),
+            _page("pages/14_Correction_Dataset.py", "Correction dataset", "🧪",
+                  visibility="visible" if feature_enabled("learning") and verify_permission(user["role"], "can_manage_corrections") else "hidden"),
+            _page("pages/15_Model_Evaluation.py", "Model evaluation", "📊",
+                  visibility="visible" if feature_enabled("learning") and verify_permission(user["role"], "can_view_model_eval") else "hidden"),
+            _page("pages/16_Users_Roles.py", "Users & roles", "👥",
+                  visibility="visible" if verify_permission(user["role"], "can_audit") else "hidden"),
         ],
     }, position="top")
 else:
@@ -122,6 +136,10 @@ else:
         _page("pages/5_Relabel.py", "Relabel", "🏷️", visibility="hidden"),
         _page("pages/9_Security.py", "Security status", "🔐", visibility="hidden"),
         _page("pages/12_Area_Access_Admin.py", "Area access requests", "📍", visibility="hidden"),
+        _page("pages/13_Hotspots.py", "Hotspots", "📈", visibility="hidden"),
+        _page("pages/14_Correction_Dataset.py", "Correction dataset", "🧪", visibility="hidden"),
+        _page("pages/15_Model_Evaluation.py", "Model evaluation", "📊", visibility="hidden"),
+        _page("pages/16_Users_Roles.py", "Users & roles", "👥", visibility="hidden"),
     ]
     router = st.navigation(guest_pages,
                            position="hidden")

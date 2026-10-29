@@ -391,14 +391,21 @@ def test_issue_extraction_uses_category_and_abstains_on_generic_text():
 
 
 def test_speech_transcript_requires_confirmation_and_nonempty_text():
+    from core.intake import MAX_COMPLAINT_CHARS, process
+
     with pytest.raises(ValueError, match="Review and confirm"):
         validate_transcript_submission("The streetlight is broken", speech_used=True, confirmed=False)
     assert validate_transcript_submission(
         "The streetlight is broken", speech_used=True, confirmed=True
     ) == "The streetlight is broken"
     assert validate_transcript_submission("Typed complaint", speech_used=False, confirmed=False) == "Typed complaint"
+    entered = "  मेरे इलाके में स्ट्रीटलाइट बंद है 😊\r\n"
+    assert validate_transcript_submission(entered, speech_used=False, confirmed=False) == entered
+    assert validate_transcript_submission(entered, speech_used=True, confirmed=True) == entered
     with pytest.raises(ValueError, match="Enter a complaint"):
         validate_transcript_submission("  ", speech_used=False, confirmed=False)
+    with pytest.raises(ValueError, match="10,000 characters or fewer"):
+        process("x" * (MAX_COMPLAINT_CHARS + 1))
 
 
 def test_photo_attachments_are_encrypted_at_rest_and_read_only_by_reviewers(db, monkeypatch, tmp_path, staff_user):

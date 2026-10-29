@@ -190,11 +190,14 @@ def render_userbar(user: dict | None = None):
     with left:
         st.markdown('<div class="nf-userbar nf-wordmark">🧭 NagrikSetu</div>', unsafe_allow_html=True)
     with right:
-        role = escape((user.get("role") or "public").title())
+        specific_role = (user.get("role") or "public").title()
+        role = escape("Public" if user.get("role") == "public" else "Government")
+        role_accessible = escape("Public account" if user.get("role") == "public"
+                                 else f"Government account, {specific_role} role")
         display_name = escape(str(user.get("name", "User")))
         st.markdown(
             f'<div class="nf-userbar">{display_name} '
-            f'<span class="nf-role-pill">{role}</span></div>', unsafe_allow_html=True)
+            f'<span class="nf-role-pill" aria-label="{role_accessible}">{role}</span></div>', unsafe_allow_html=True)
     with signout:
         if st.button("Sign out", key="nagriksetu_signout", width="stretch"):
             from .auth import logout_session

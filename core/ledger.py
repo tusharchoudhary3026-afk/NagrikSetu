@@ -5,9 +5,18 @@ from .db import execute, fetch_all
 from .geo import authorize_staff_complaint
 from .geo import STAFF_ROLES
 
+PROHIBITED_FINAL_ACTION_EVENTS = {
+    "close", "closed", "closure", "reject", "rejected", "rejection",
+    "deprioritize", "deprioritise", "auto_close", "auto_reject",
+    "auto_deprioritize", "auto_deprioritise", "auto_merge", "merge",
+    "duplicate_merge", "auto_duplicate_merge",
+}
+
 
 def log_event(complaint_id, event_type, actor, suggested_dept=None, final_dept=None,
               reason=None, reason_code=None, details=None, actor_user=None):
+    if str(event_type or "").strip().casefold() in PROHIBITED_FINAL_ACTION_EVENTS:
+        raise ValueError("Automatic closure, rejection, deprioritization, and duplicate merging are prohibited.")
     if actor_user and actor_user.get("role") in STAFF_ROLES:
         authorize_staff_complaint(actor_user["role"], complaint_id, actor_user)
     if event_type in REASON_REQUIRED and not (reason or "").strip():

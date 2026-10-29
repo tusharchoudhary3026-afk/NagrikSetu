@@ -3,7 +3,7 @@ import streamlit as st
 
 from core import intake, ownership, router_baseline, splitter
 from core.attachment import save_attachment
-from core.config import SIM_LABEL
+from core.config import SIM_LABEL, feature_enabled
 from core.db import init_db, insert_complaint, insert_suggestion
 from core.ledger import log_event
 from core.safety import flag_safety
@@ -24,15 +24,19 @@ apply_demo_style()
 render_hero("Complaint intake", "Complain here", "Capture the original report, inspect suggestions, and save it for a person to review.")
 st.warning(SIM_LABEL)
 
-speech_enabled = st.checkbox("I understand browser speech recognition may send audio to its provider; NagrikSetu does not store audio.")
-speech = speech_input(enabled=speech_enabled, key="nyayaflow_speech", default=None)
-if speech and speech.get("id") != st.session_state.get("last_speech_id"):
-    st.session_state["intake_text"] = speech.get("transcript", "")
-    st.session_state["last_speech_id"] = speech["id"]
-    st.session_state["speech_transcript_pending"] = bool(speech.get("transcript"))
-    st.session_state["confirm_speech_transcript"] = False
-    st.session_state["speech_language"] = speech.get("language", "en-IN")
+if feature_enabled("voice"):
+    speech_enabled = st.checkbox("I understand browser speech recognition may send audio to its provider; NagrikSetu does not store audio.")
+    speech = speech_input(enabled=speech_enabled, key="nyayaflow_speech", default=None)
+    if speech and speech.get("id") != st.session_state.get("last_speech_id"):
+        st.session_state["intake_text"] = speech.get("transcript", "")
+        st.session_state["last_speech_id"] = speech["id"]
+        st.session_state["speech_transcript_pending"] = bool(speech.get("transcript"))
+        st.session_state["confirm_speech_transcript"] = False
+        st.session_state["speech_language"] = speech.get("language", "en-IN")
+else:
+    st.caption("Voice intake is disabled; enter the complaint below.")
 text = st.text_area("Complaint (Hindi / English / Hinglish) · edit the transcript before processing", height=120,
+                    max_chars=intake.MAX_COMPLAINT_CHARS,
                     key="intake_text")
 speech_used = bool(st.session_state.get("speech_transcript_pending"))
 transcript_confirmed = st.checkbox("I reviewed and confirm this transcript", key="confirm_speech_transcript") if speech_used else False
@@ -52,7 +56,7 @@ else:
 if st.button("Process complaint", type="primary"):
     try:
         if not assigned_areas:
-            raise ValueError("You need a verified service area before using staff-assisted intake.")
+            raise ValueError("Select a service area before using staff-assisted intake.")
         text = validate_transcript_submission(text, speech_used, transcript_confirmed)
         rec = intake.process(text, channel, loc_hint)
         area = area_by_key[selected_area]
@@ -103,17 +107,22 @@ if "rec" in st.session_state:
         confirm_split = st.checkbox("I reviewed and confirm these proposed sub-issues")
     elif sp["is_compound"]:
         st.caption("A reviewer must confirm the proposed split. The complaint will be saved intact for now.")
+    photos_enabled = feature_enabled("photos")
     photo_status = attachment_encryption_status()
-    if photo_status["configured"]:
-        st.caption("Photo evidence storage: AES-256-GCM encryption at rest. Images are not analyzed.")
+    if not photos_enabled:
+        st.caption("Photo evidence is disabled by configuration.")
+        photo = None
     else:
-        st.warning("Secure photo upload is disabled until NYAYAFLOW_ATTACHMENT_KEY is configured.")
-    photo = st.file_uploader("Optional photo evidence (JPEG/PNG, max 5 MB; no image analysis)",
-                             type=["jpg", "jpeg", "png"], disabled=not photo_status["configured"])
+        if photo_status["configured"]:
+            st.caption("Photo evidence storage: AES-256-GCM encryption at rest. Images are not analyzed.")
+        else:
+            st.warning("Secure photo upload is unavailable until encrypted photo storage is configured.")
+        photo = st.file_uploader("Optional photo evidence (JPEG, PNG or WEBP, max 5 MB; no image analysis)",
+                                 type=["jpg", "jpeg", "png", "webp"], disabled=not photo_status["configured"])
 
     if st.button("Save to review queue"):
         if photo is not None and not photo_status["configured"]:
-            st.error("Photo not saved: configure NYAYAFLOW_ATTACHMENT_KEY first.")
+            st.error("Photo not saved: secure photo storage is not configured.")
             st.stop()
         rec["case_id"] = f"CASE-{uuid.uuid4().hex.upper()}"
         try:

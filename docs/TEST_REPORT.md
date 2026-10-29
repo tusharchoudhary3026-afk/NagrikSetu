@@ -1,5 +1,9 @@
 # Test and evaluation report
 
+## Latest audit run (2026-10-29)
+
+The latest repository suite completed **169 passed** (`python -m pytest tests run_test.py -q`); the acceptance runner completed **166 passed** (`python -m scripts.run_acceptance`), with AT-01 through AT-06 **6/6 PASS**. A final focused Streamlit staff shell/dashboard run after the UI wording update completed **21 passed**. The staff area self-selection regression verifies that an ordinary reviewer selects Gole Ka Mandir without administrator approval and sees the submitted complaint and original text in the rendered page. Streamlit `AppTest` also confirms the public case appears in each of the three exact demo staff views. Transcript preservation, complaint-size enforcement, demo-only area seeding, abstained manual-queue visibility, role guards, and automatic-final-action prevention are covered by the suites. See [STAFF_AREA_SELF_SELECTION_2026-10-29.md](STAFF_AREA_SELF_SELECTION_2026-10-29.md) for the current access policy, [DEMO_STAFF_AREA_ACCESS_FIX_2026-10-29.md](DEMO_STAFF_AREA_ACCESS_FIX_2026-10-29.md) for the earlier demo setup, and [CODE_AUDIT_2026-10-29.md](CODE_AUDIT_2026-10-29.md) for the full architecture, coverage and limitations. There is no HTTP API in this Streamlit project; server services are exercised directly. The dated verification sections below are historical runs.
+
 Run date: 2026-10-28. All model/evaluation datasets are synthetic. Commands ran with Python 3.12 from the repository virtual environment and temporary pytest databases. The configured SQLite database was backed up before both additive migrations.
 
 ## Automated verification
@@ -21,6 +25,16 @@ The AT-04 reviewer-override acceptance path now signs in a synthetic reviewer an
 The final direct `python -m pytest -q` run after the dashboard changes completed with **142 passed**. The separate `python -m scripts.run_acceptance` run completed with **139 passed**, and AT-01 through AT-06 all passed. New dashboard coverage verifies department and geography isolation, stale/forged department rejection, operator/reviewer/auditor/public access, the post-login staff landing page, reasoned dispatch/clarification/resolution/transfer events, append-only history, transfer bounce warnings, SLA calculations, scoped hotspot summaries, ownership warnings, department-filtered duplicate candidates, and case timelines. `python -m compileall -q app.py core pages scripts tests` and `git diff --check` succeeded.
 
 No schema migration was needed for dashboard actions: status transitions and handoffs are derived from the existing append-only ledger and challenge rows. The default seven-day SLA is configurable with `NAGRIKSETU_DEMO_SLA_DAYS` and is labeled as a demo assumption.
+
+### Public complaint visibility follow-up (2026-10-29)
+
+The reported missing complaint was traced to two separate conditions. First, the screenshot showed that the staff account had no verified service area and its access request was pending; `core/geo.py::scoped_complaints` intentionally returns no area-scoped cases until approval. The test now proves that the case is hidden while the request is pending and becomes visible to the matching operator after an authorized reviewer approves the area. Second, the dashboard now labels a missing suggestion row as requiring human review, so an incomplete routing result is not presented as a confident assignment.
+
+Public submission writes the complaint, suggestion (including abstention), and initial ledger event in one SQLite transaction. A forced suggestion-insert failure verifies rollback and a visible form error with no success message or complaint row. The raw location remains unchanged in `complaints.location`; the additive `location_normalized` field stores NFC/case-folded, whitespace-collapsed matching text and has an index. Existing rows are backfilled by the migration.
+
+Verification: focused integration/regression run **50 passed**; direct repository-root `python -m pytest -q` **151 passed**; `python -m scripts.run_acceptance` **148 passed**, with AT-01 through AT-06 passing; `python -m compileall -q app.py core pages scripts tests` and `git diff --check` succeeded. The acceptance script currently runs `tests/` (148 tests); the direct repository-root run also collects the three `run_test.py` tests. Streamlit AppTest exercises the actual public form and staff query against a temporary SQLite database. This project has no separate HTTP API, API base URL, staff token, or browser network request to capture; its Streamlit form submits through in-process Python handlers. No production browser, email/SMS provider, or deployment environment was exercised.
+
+Staff access is bounded by the area the signed-in staff member selects; each selection is recorded as an append-only access event. Operators are additionally restricted to their assigned department. A staff member can now select an area without geography-admin approval; this intentionally broadens geography visibility to registered staff and is described in [STAFF_AREA_SELF_SELECTION_2026-10-29.md](STAFF_AREA_SELF_SELECTION_2026-10-29.md). A reviewer sees abstained and missing-suggestion cases as manual review. Complaints without structured geography remain restricted to geography triage.
 
 ## Frozen complaint-routing evaluation
 

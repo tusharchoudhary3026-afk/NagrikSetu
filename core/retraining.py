@@ -1,7 +1,10 @@
 """Offline-only model experiment using verified correction examples; never deploys a model."""
+import hashlib
 import pandas as pd
+import json
 
 from core.config import COMPLAINTS
+from core.config import feature_enabled
 from core.corrections import load_verified_corrections
 from core.db import init_db
 from core.engine8_harness import _evaluate_router
@@ -16,6 +19,8 @@ def _tokens(text):
 
 def run_offline_retraining_experiment(min_verified: int = 10):
     """Return a comparison only when enough reviewed examples exist; persist no model or metrics."""
+    if not feature_enabled("learning"):
+        raise PermissionError("Offline learning experiments are disabled by configuration.")
     if min_verified < 1:
         raise ValueError("At least one verified example is required.")
     init_db()
@@ -49,10 +54,18 @@ def run_offline_retraining_experiment(min_verified: int = 10):
                   if " ".join(str(row["text"]).casefold().split()) not in conflicts]
     verified_clean = pd.DataFrame(clean_rows, columns=["text", "owner_label"])
     departments = set(verified_clean["owner_label"]) if not verified_clean.empty else set()
+    version_payload = {
+        "training_ids": train["id"].astype(str).tolist() if "id" in train.columns else [],
+        "verified_corrections": verified_clean.to_dict("records"),
+    }
+    dataset_version = "verified-corrections-" + hashlib.sha256(
+        json.dumps(version_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:12]
     if len(verified_clean) < min_verified or len(departments) < 2:
         return {"status": "insufficient_verified_examples", "verified_examples": len(verified_clean),
                 "minimum_required": min_verified, "departments": sorted(departments),
-                "excluded_conflicting_labels": len(conflicts), "model_saved": False, "deployed": False}
+                "excluded_conflicting_labels": len(conflicts), "dataset_version": dataset_version,
+                "model_saved": False, "deployed": False}
 
     augmented = pd.concat([train[["text", "owner_label"]], verified_clean], ignore_index=True)
     candidate = TfidfRouter().fit(augmented["text"], augmented["owner_label"])
@@ -63,6 +76,7 @@ def run_offline_retraining_experiment(min_verified: int = 10):
                                 lambda text: candidate.route(text, threshold))
     return {"status": "experiment_completed", "verified_examples": len(verified_clean),
             "departments": sorted(departments), "excluded_conflicting_labels": len(conflicts),
+            "dataset_version": dataset_version,
             "threshold": threshold, "validation_curve": curve,
             "baseline": baseline, "candidate": proposed,
             "test_manifest": frozen["sha256"], "model_saved": False, "deployed": False}

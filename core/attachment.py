@@ -7,7 +7,7 @@ from PIL import Image, ImageOps
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .auth import enforce_rbac
-from .config import ROOT
+from .config import ROOT, feature_enabled
 from .db import execute, fetch_all, get_conn
 from .security import attachment_encryption_key
 from .geo import authorize_staff_complaint
@@ -91,6 +91,8 @@ def validate_attachments(uploaded_files) -> int:
 
 def save_attachments(complaint_id: int, uploaded_files, actor_role: str, actor_user: dict | None = None) -> list[str]:
     """Validate and store up to three private, metadata-stripped photo files atomically."""
+    if not feature_enabled("photos"):
+        raise PermissionError("Photo evidence is disabled by configuration.")
     enforce_rbac(actor_role, "can_intake")
     files = [uploaded for uploaded in (uploaded_files or []) if uploaded is not None]
     if not files:
@@ -151,6 +153,8 @@ def save_attachment(complaint_id: int, uploaded_file, actor_role: str, actor_use
 
 
 def get_attachments(complaint_id: int, actor_role: str, actor_user: dict | None = None):
+    if not feature_enabled("photos"):
+        raise PermissionError("Photo evidence is disabled by configuration.")
     enforce_rbac(actor_role, "can_view_attachments")
     if actor_role in STAFF_ROLES:
         if not actor_user or actor_user.get("role") != actor_role:
@@ -165,6 +169,8 @@ def get_attachments(complaint_id: int, actor_role: str, actor_user: dict | None 
 
 def read_attachment(attachment_id: int, actor_role: str, actor_user: dict | None = None) -> bytes:
     """Return decrypted photo bytes to an authorized reviewer; legacy plaintext is denied."""
+    if not feature_enabled("photos"):
+        raise PermissionError("Photo evidence is disabled by configuration.")
     enforce_rbac(actor_role, "can_view_attachments")
     rows = fetch_all("SELECT complaint_id, filename, file_path, is_encrypted FROM attachments WHERE id=?",
                      (attachment_id,))

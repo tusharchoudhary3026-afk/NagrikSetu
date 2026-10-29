@@ -8,7 +8,6 @@ NagrikSetu is a human-reviewed civic grievance routing prototype. Its demo recor
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-$env:NYAYAFLOW_DB_PATH = "data/nyayaflow.db"
 # Required for encrypted photo uploads; keep this stable and private.
 $env:NYAYAFLOW_ATTACHMENT_KEY = "<stable-64-character-key-from-your-secrets-manager>"
 python -m scripts.init_db
@@ -17,13 +16,17 @@ python -m streamlit run app.py
 
 ## Authentication and roles
 
-Public users can register and sign in with email/password or an Indian mobile number/password. Phone registration requires a one-time verification step. Staff register only through `data/staff_directory.csv`; their directory role and department are assigned server-side and a staff email code is required. Government staff select their service area after sign-in and receive complaint access only after an authorized reviewer approves that area.
+Public users can register and sign in with email/password or an Indian mobile number/password. Phone registration requires a one-time verification step. Staff register only through `data/staff_directory.csv`; their directory role and department are assigned server-side and a staff email code is required. After sign-in, staff select a State, City and Area and immediately see complaints for that location; the selection is recorded in append-only access history without waiting for administrator approval. Operators remain limited by their department, reviewers can review cases, and auditors are read-only.
 
-The checked-in staff directory and all verification codes are synthetic. The app starts in **DEMO MODE**, displays simulated codes on screen, and sends no real email or SMS. Staff directory identities do not establish real employment. Existing accounts and roles are retained; public signup cannot choose a staff role. The existing public role is named `public` in the database and corresponds to the citizen-facing interface.
+The checked-in staff directory and all verification codes are synthetic. The app starts in **DEMO MODE**, displays simulated codes on screen, and sends no real email or SMS. Staff directory identities do not establish real employment. Existing accounts and roles are retained; public signup cannot choose a staff role. The existing public role is named `public` in the database and corresponds to the citizen-facing interface. A separate, opt-in `NYAYAFLOW_SEED_DEMO_STAFF=1` flag grants city-wide Gwalior access only to the exact synthetic operator01, reviewer01, and auditor01 accounts; the flag defaults off and must never be set in production.
 
 After staff sign-in, the Overview route opens the staff complaint operations dashboard; the public report form is not shown as the staff landing page. Operator inboxes are server-filtered by the account department and approved service areas. Reviewer and auditor visibility remains bounded by role and geography; auditors are read-only. The dashboard provides status/SLA cards, scoped search and filters, case routing and evidence, safety/ownership/duplicate signals, open review requests, an immutable timeline, and reasoned ledger actions. See `docs/STAFF_DASHBOARD.md` for role scope and demo assumptions.
 
 For local use, install the requirements and start `python -m streamlit run app.py`; schema migrations run on app startup. For the full authentication behavior and migration notes, see [docs/AUTH_NOTES.md](docs/AUTH_NOTES.md). Passwords are stored as bcrypt hashes (or scrypt if bcrypt is unavailable). Verification codes are stored as keyed hashes. Login attempts and authentication audit events persist in SQLite. These are prototype controls, not a production security certification.
+
+To enable the optional synthetic city-wide demo assignments locally, set `NAGRIKSETU_DEMO_MODE=1` and `NYAYAFLOW_SEED_DEMO_STAFF=1` in the app process environment. Existing registered demo accounts receive an append-only Gwalior city assignment at login; newly registered demo accounts receive it after email-code verification. To seed already registered users explicitly, run `python -m scripts.seed_demo_staff_areas` with those two variables set. The seed does nothing when either flag is off and is limited to the exact `operator01`, `reviewer01`, and `auditor01` synthetic emails. Ordinary staff can select areas directly in the UI without this optional demo seed.
+
+The application uses one SQLite database path: `db/nyayaflow.db` by default, overridden only by `NYAYAFLOW_DB_PATH`. Relative overrides resolve from the project root. This Streamlit app has no separate HTTP API or API base URL. [.env.example](.env.example) documents optional environment variables; Streamlit does not load it automatically, so export values in your VS Code terminal.
 
 Real email/SMS delivery, MFA, password reset, SQLite encryption at rest, and production HTTPS/identity configuration are ROADMAP items. Disabling demo mode without setting `NAGRIKSETU_AUTH_SECRET` produces a clear configuration error; even with that secret, staff and phone verification cannot proceed until real providers are implemented.
 

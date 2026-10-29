@@ -21,17 +21,22 @@ from .password_policy import generate_strong_password, score_password
 assess_password = score_password
 
 ROLES = {
-    "public": {"can_intake": True, "can_view_attachments": False, "can_view_security": False},
+    "public": {"can_intake": True, "can_view_attachments": False, "can_view_security": False,
+               "can_view_hotspots": False, "can_manage_corrections": False, "can_view_model_eval": False},
     "government": {"can_intake": True, "can_review": True, "can_audit": True,
-                   "can_view_attachments": True, "can_manage_users": True, "can_view_security": True},
+                   "can_view_attachments": True, "can_manage_users": True, "can_view_security": True,
+                   "can_view_hotspots": True, "can_manage_corrections": True, "can_view_model_eval": True},
     # Retained only for compatibility utilities and archived accounts. These roles
     # cannot access the new interfaces through require_role().
     "operator": {"can_intake": True, "can_review": False, "can_audit": False,
-                 "can_view_attachments": False, "can_manage_users": False},
+                 "can_view_attachments": False, "can_manage_users": False, "can_view_hotspots": True,
+                 "can_manage_corrections": False, "can_view_model_eval": False},
     "reviewer": {"can_intake": True, "can_review": True, "can_audit": True,
-                 "can_view_attachments": True, "can_manage_users": True},
+                 "can_view_attachments": True, "can_manage_users": True, "can_view_hotspots": True,
+                 "can_manage_corrections": True, "can_view_model_eval": True},
     "auditor": {"can_intake": False, "can_review": False, "can_audit": True,
-                "can_view_attachments": False, "can_manage_users": False},
+                "can_view_attachments": False, "can_manage_users": False, "can_view_hotspots": True,
+                "can_manage_corrections": False, "can_view_model_eval": True},
 }
 STAFF_ROLES = {"government", "operator", "reviewer", "auditor"}
 _EMAIL = re.compile(r"^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$", re.I)
@@ -503,6 +508,8 @@ def verify_staff_registration(email: str, code: str) -> dict:
         account = get_active_user(user_id)
         _auth_event("registration", normalized, "success", staff["role"])
         _auth_event("verification", normalized, "success", staff["role"])
+        from .geo import seed_demo_staff_assignments
+        seed_demo_staff_assignments()
         return account
     finally:
         conn.close()
@@ -627,6 +634,9 @@ def authenticate_identifier(identifier: str, password: str) -> dict | None:
         result = {key: account[key] for key in ("id", "email", "name", "role", "auth_provider",
                                                 "phone", "phone_verified", "department")}
         _auth_event("login_success", normalized, "success", account["role"])
+        if account["role"] in STAFF_ROLES:
+            from .geo import seed_demo_staff_assignments
+            seed_demo_staff_assignments()
         return result
     except LoginLockedError:
         raise

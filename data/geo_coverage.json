@@ -11,7 +11,15 @@
           {"code": "mp-gwalior-lashkar", "name": "Lashkar"},
           {"code": "mp-gwalior-city-centre", "name": "City Centre"},
           {"code": "mp-gwalior-hazira", "name": "Hazira"},
-          {"code": "mp-gwalior-kampoo", "name": "Kampoo"}
+          {"code": "mp-gwalior-kampoo", "name": "Kampoo"},
+          {"code": "mp-gwalior-dd-nagar", "name": "DD Nagar"},
+          {"code": "mp-gwalior-phool-bagh", "name": "Phool Bagh"},
+          {"code": "mp-gwalior-maharaj-bada", "name": "Maharaj Bada"},
+          {"code": "mp-gwalior-jayendraganj", "name": "Jayendraganj"},
+          {"code": "mp-gwalior-station-road", "name": "Station Road"},
+          {"code": "mp-gwalior-jhansi-road", "name": "Jhansi Road"},
+          {"code": "mp-gwalior-tansen-road", "name": "Tansen Road"},
+          {"code": "mp-gwalior-sirol-road", "name": "Sirol Road"}
         ]},
         {"code": "mp-bhopal", "name": "Bhopal", "areas": [
           {"code": "mp-bhopal-arera-colony", "name": "Arera Colony"},

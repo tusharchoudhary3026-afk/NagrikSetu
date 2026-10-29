@@ -1,0 +1,142 @@
+NyayaFlow
+Frontend Blueprint — Engines 11–15
+A screen-by-screen implementation guide: where each feature belongs, what the UI should show, how interactions should work,
+and what must be tested.
+Shared frontend structure
+Navigation
+Citizen: New Complaint · My Complaints · Complaint Details. Staff: Overview · Complaint Queue · Complaint Details · Hotspots ·
+Review Requests. Admin/Technical Review: Users & Roles · Correction Dataset · Model Evaluation. Show only role-appropriate
+navigation, but enforce permissions on the backend too.
+Shared complaint details
+Use one complaint record and ID across all engines. Main panel: complaint text, detected issues, suggested/assigned department,
+explanation and status. Side panel: photos, review request, assigned reviewer and decision history. Reuse existing status chips
+and history components.
+States every screen needs
+Loading · Empty · Success · Validation error · Upload/processing failure · Permission denied · Pending review. Do not show
+success until the server confirms the action.
+ENGINE 11 — Voice Complaint Intake & Speech-to-Text (TRY)
+Where it goes
+Citizen Portal → New Complaint, immediately above or beside the existing complaint text area. Voice should be an optional way to
+fill the same text field—not a separate journey.
+UI layout
+1. Page title: “Submit a complaint”. 2. Hint: “Type your complaint or describe it by voice.” 3. Existing text area plus a secondary
+Record voice button. 4. During recording: recording indicator, timer and Stop recording. 5. After transcription: editable text box
+labelled Review transcript. 6. Actions: Try again · Use this text · Continue.
+Interaction flow
+Tap Record → request microphone permission → show recording state → Stop → send audio to transcription endpoint → show
+editable transcript → citizen fixes errors → citizen confirms → pass confirmed text into the existing intake/routing pipeline.
+UX and technical rules
+ Never submit a transcript automatically.  Always allow typing as fallback.  Ask users to check names, locations and numbers. 
+Show a clear failure state if recording/transcription fails.  Do not expose API keys in frontend code.  Prefer not to retain raw audio
+unless needed and covered by a retention policy.
+Acceptance checks
+■ Typing works without voice. ■ User can record/stop. ■ Transcript is editable. ■ Failure does not erase complaint text. ■ Only
+confirmed text proceeds.
+ENGINE 12 — Complaint Evidence Attachment (BUILD)
+Where it goes
+Citizen Portal → New Complaint, below the text area. Show uploaded images again on the same Complaint Details page for
+authorized staff.
+UI layout
+An Add photo card with camera/gallery picker, allowed formats and size limit. After selection show thumbnail, filename, upload
+progress, Remove/Replace and error/retry message. On Complaint Details, show private image previews plus filename and upload
+date.
+Interaction flow
+Select photo → validate type/size → upload → backend checks permission and file metadata → save private attachment reference
+linked to complaint ID → show thumbnail only after server confirmation → authorized reviewer can view it.
+UX and security rules
+ Photo is citizen-provided context, not verified proof.  No image analysis or auto-approval.  Restrict file type/size and use safe
+storage names.  Do not use public bucket URLs.  Consider removing EXIF/location metadata.  Upload failure must allow retry
+without losing complaint text.
+\nBackend expectation
+Upload endpoint returns attachment ID and safe metadata. Complaint API only returns attachments the current user is authorized
+to view. Use private storage and server/database access policies.
+Acceptance checks
+■ Valid image uploads. ■ Invalid/oversized file is rejected. ■ Correct complaint shows the image. ■ Unauthorized access is
+blocked. ■ Failed upload can be retried.
+ENGINE 13 — Hotspot Detection (BUILD)
+Where it goes
+Staff Portal → Hotspots page, plus a small “Potential hotspots” widget on the staff Overview. No map is needed.
+UI layout
+Top filters: date range, ward/area, issue category and time window. Summary cards: total complaints, areas flagged, selected
+period. Table columns: Area/Ward · Category · Current count · Baseline count · Change · Why flagged · View complaints. Add a
+trend chart only if dated data is reliable.
+Detection logic
+Aggregate complaints by area + issue category + time window. Compare current count with a documented baseline (e.g., previous
+comparable period). Flag when a documented threshold is met; show current count, baseline, comparison dates and rule. Treat a
+hotspot as a review signal—not proof of cause, negligence or department failure.
+Illustrative card
+Potential hotspot · Ward 08 · Street lighting
+Current period: 18 complaints · Baseline: 7 · Example rule: at least 2× baseline and at least 5 complaints. Illustrative only—not real
+data.
+Interaction flow and rules
+Open hotspot → inspect counts and period → click View related complaints → open a filtered queue → staff investigates. Label all
+synthetic/demo figures SIMULATED. Include an insufficient-data state; never label an area “negligent”.
+Acceptance checks
+■ Filters change counts. ■ Counts link to underlying complaints. ■ Baseline/rule are visible. ■ Simulated data is labelled. ■ No
+map dependency.
+ENGINE 14 — Citizen Challenge & Review Portal (BUILD)
+Where it goes
+Citizen Portal → My Complaints → Complaint Details. Add Request routing review when the complaint is in a state where review
+is allowed. Staff get a dedicated Review Requests queue.
+Citizen screen
+Show current suggested/assigned department and a plain-language explanation. Button opens a short form: reason category
+(wrong department / multiple issues / missing context / other), details text and Submit request. After submission, display Pending
+review with submitted date.
+Reviewer screen
+Queue columns: Complaint ID · Current department · Citizen reason · Submitted time · Status. Detail view shows original complaint,
+issue split, routing evidence and prior decisions. Actions: Keep routing · Change department · Split/re-route issue · Escalate.
+Require a written reason before saving.
+Interaction flow
+Citizen submits request → backend creates review request → authorized reviewer evaluates it → reviewer chooses action and
+records reason → backend updates the permitted status/routing and appends a decision-history event → citizen sees the outcome.
+UX and safety rules
+ Citizen request must not itself change routing.  Avoid duplicate active requests or show an existing pending request.  Preserve
+original suggestion and final decision in history.  Enforce permissions server-side.  Never automatically reject or close the
+complaint.
+Acceptance checks
+■ Citizen can explain challenge. ■ Reviewer queue receives it. ■ Unauthorized role cannot decide it. ■ Decision requires reason.
+■ Citizen can see outcome.
+ENGINE 15 — Secure Access & Continuous Learning (BUILD in phases)
+Where it goes
+\nRole-based navigation and permission states apply throughout the app. Put Users & Roles under Admin. Put Correction Dataset
+and Model Evaluation under Admin/Technical Review, never in citizen navigation.
+Roles
+Operator: routine intake and assigned complaints. Reviewer: routing corrections and review requests. Auditor: read-only access
+to permitted history and evaluation summaries. Add an Admin role only if needed; keep account management separate from
+ordinary staff.
+Security UX
+Hide unavailable actions for clarity, but do not treat hidden buttons as security. Every protected API/database operation must
+enforce authorization. Show “You don’t have permission” on denied access. Never place service-role keys or model API secrets in
+browser code.
+Correction capture UI
+When a reviewer changes a department, capture original suggestion, final department, issue category, reason, reviewer, timestamp
+and label source/provenance. Provide a filterable corrections table and allow disputed/incorrect labels to be excluded from training.
+Learning flow — phased, not automatic
+Phase 1: Save verified corrections only. Phase 2: When enough reviewed labels exist, create a versioned dataset and run offline
+training. Phase 3: Compare candidate vs current baseline on the same frozen hold-out test set; report overall and language-wise
+errors and abstention. Phase 4: Human review and explicit release decision. Never retrain/deploy automatically after every
+correction.
+UI components and acceptance checks
+Use role badges, permission-aware navigation, correction-reason form, corrections table, dataset version label and evaluation
+comparison table. If data is insufficient, show “Not ready for retraining,” not fabricated metrics. ■ API/database permissions
+enforced. ■ Correction provenance saved. ■ Disputed labels excluded. ■ Frozen test set used. ■ No automatic deployment. Verify
+storage encryption settings before claiming encryption at rest.
+Cross-engine build plan
+1. Define shared complaint/attachment IDs, role permissions and status transitions. 2. Build photo attachment (Engine 12). 3. Build
+citizen review form and staff queue (Engine 14). 4. Apply role permissions to every protected endpoint (Engine 15). 5. Build hotspot
+aggregation from stored area/category/time fields (Engine 13). 6. Add optional speech input to the same complaint field (Engine
+11). 7. Collect verified corrections; attempt offline retraining only when the dataset and evaluation are ready.
+Suggested frontend file structure
+app/citizen/complaints/new/page.tsx — typed/voice intake + photo upload
+app/citizen/complaints/[id]/page.tsx — details, attachments, request review
+app/staff/hotspots/page.tsx — filters, cards, hotspot table
+app/staff/review-requests/page.tsx — reviewer queue
+app/admin/users/page.tsx — role management
+app/admin/corrections/page.tsx — correction dataset
+app/admin/model-evaluation/page.tsx — baseline/candidate comparison
+components/complaints/VoiceInput.tsx, PhotoAttachments.tsx, RoutingReviewForm.tsx, RoleGate.tsx,
+HotspotTable.tsx — reusable components. Adjust paths to match the existing repository.
+Final UI rules
+All five engines should extend the same complaint lifecycle and reuse complaint IDs, statuses and history. Label synthetic data
+clearly. Do not claim a feature is implemented until end-to-end tests pass. Human reviewers retain authority over routing decisions.
+Keep citizen screens mobile-friendly.

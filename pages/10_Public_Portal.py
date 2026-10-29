@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 
 import streamlit as st
@@ -6,16 +7,16 @@ import streamlit as st
 from core.attachment import save_attachments, validate_attachments
 from core.auth import require_role
 from core import intake, router_baseline
-from core.config import SIM_LABEL
-from core.db import init_db, insert_complaint, insert_suggestion
-from core.ledger import log_event
+from core.config import SIM_LABEL, feature_enabled
+from core.db import init_db, insert_public_submission
 from core.portal import list_own_complaints
 from core.privacy import mask_text
 from core.security import attachment_encryption_status
-from core.suggestions import selected_department
 from core.ui import apply_demo_style, render_hero
-from core.geo import partial_geography_names
+from core.geo import known_area_for_location, partial_geography_names
 from core.geo_ui import render_geography_picker
+from core.speech import validate_transcript_submission
+from core.speech_component import speech_input
 
 init_db()
 user = require_role("public")
@@ -28,56 +29,116 @@ with tab_submit:
     st.caption("Share only details needed to understand the issue. Do not include passwords, financial information, or highly sensitive personal data.")
     state_code, city_code, area_code = render_geography_picker("resident-complaint", allow_unknown=True)
     st.caption("Location options are prototype coverage and may not include every ward. Choose ‘Not sure’ if unknown.")
+    voice_enabled = feature_enabled("voice")
+    speech_used = False
+    transcript_confirmed = False
+    if voice_enabled:
+        st.caption("Type your complaint or describe it by voice. Please check names, locations and numbers.")
+        consent = st.checkbox("I understand browser speech recognition may send audio to its provider; NagrikSetu does not store audio.",
+                              key="public-speech-consent")
+        speech = speech_input(enabled=consent, key="public-complaint-speech", default=None)
+        if speech and speech.get("id") != st.session_state.get("public_last_speech_id"):
+            transcript = speech.get("transcript", "")
+            if transcript:
+                st.session_state["public_complaint_text"] = transcript
+                st.session_state["public_speech_transcript_pending"] = True
+                st.session_state["public_last_speech_id"] = speech.get("id")
+        speech_used = bool(st.session_state.get("public_speech_transcript_pending"))
     with st.form("public_complaint"):
-        text = st.text_area("What is the problem?", height=140, placeholder="For example: A streetlight is not working near the community center.")
+        text = st.text_area("Review transcript" if speech_used else "What is the problem?", height=140,
+                            max_chars=intake.MAX_COMPLAINT_CHARS,
+                            placeholder="For example: A streetlight is not working near the community center.",
+                            key="public_complaint_text")
+        if speech_used:
+            transcript_confirmed = st.checkbox("I reviewed and confirm this transcript", key="public-speech-confirmed")
         location = st.text_input("Street or nearby landmark (optional)", placeholder="Street, building, or nearby landmark")
+        photos_enabled = feature_enabled("photos")
         attachments = st.file_uploader("Add up to 3 photos (optional)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True,
-                                       help="Each photo may be up to 5 MB. Photos are securely stored for authorized staff and are never analyzed.")
+                                       help="JPEG, PNG or WEBP · up to 5 MB each. Photos provide context only and are never analyzed.",
+                                       disabled=not photos_enabled)
         encryption = attachment_encryption_status()
-        if not encryption["configured"]:
+        if photos_enabled and not encryption["configured"]:
             st.info("Secure photo upload is currently unavailable. You can still submit the complaint without photos.")
+        if not photos_enabled:
+            st.info("Photo evidence is disabled by configuration.")
         submitted = st.form_submit_button("Review and submit", type="primary", width="stretch")
     if submitted:
         try:
-            if not (text or "").strip():
-                raise ValueError("Describe the issue before submitting.")
+            text = validate_transcript_submission(text, speech_used, transcript_confirmed)
             if attachments and not encryption["configured"]:
                 raise ValueError("Photo upload is unavailable until secure storage is configured. Remove the photos and submit the text, or try later.")
             validate_attachments(attachments)
-            rec = intake.process(text, "portal", location.strip())
+            rec = intake.process(text, "portal", location)
             geo = partial_geography_names(state_code, city_code, area_code)
             rec.update(geo)
-            if area_code:
-                rec["location"] = location.strip() or geo["area_name"]
             if not area_code:
+                known_area = known_area_for_location(state_code, city_code, location)
+                if known_area:
+                    rec.update(known_area)
+                    rec["state_name"] = geo["state_name"]
+                    rec["city_name"] = geo["city_name"]
+            if area_code:
+                rec["location"] = location if location and location.strip() else geo["area_name"]
+            if not rec.get("area_code"):
                 rec["missing_fields"] = ",".join(filter(None, [rec.get("missing_fields", ""), "service_area"]))
             route = router_baseline.route(text)
             rec["case_id"] = f"CASE-{uuid.uuid4().hex[:12].upper()}"
-            complaint_id = insert_complaint(rec, submitted_by=user["id"])
-            try:
-                insert_suggestion(complaint_id, "baseline", route["top3"], route["evidence"], route["confidence"], route["abstained"])
-                suggestion = selected_department(route)
-                log_event(complaint_id, "suggested", "system", suggested_dept=suggestion,
-                          details={"abstained": route["abstained"], "confidence": route["confidence"],
-                                   "synthetic": True, "extracted_issue_evidence": rec.get("issue_evidence", [])})
-                if attachments:
+            complaint_id = insert_public_submission(rec, route, submitted_by=user["id"])
+            attachment_warning = None
+            if attachments:
+                try:
                     save_attachments(complaint_id, attachments, user["role"], actor_user=user)
-            except Exception:
-                # Complaint rows may already have append-only ledger history, so do
-                # not delete them as a rollback strategy. The failure remains visible.
-                raise
+                except Exception:
+                    # The complaint itself is committed. Do not tell the resident it
+                    # failed (and invite duplicate submissions) when only a photo failed.
+                    logging.getLogger(__name__).exception(
+                        "Photo storage failed after complaint %s was committed", rec["case_id"])
+                    attachment_warning = "The complaint was saved, but one or more photos could not be attached."
+                    st.session_state["public_pending_photo_upload"] = [
+                        {"name": str(getattr(item, "name", "photo")), "data": item.getvalue()}
+                        for item in attachments if item is not None
+                    ]
             st.session_state["last_public_submission"] = {"case_id": rec["case_id"],
                                                            "question": intake.clarification_question(rec),
-                                                           "area": rec.get("area_name")}
+                                                           "area": rec.get("area_name"),
+                                                           "attachment_warning": attachment_warning,
+                                                           "complaint_id": complaint_id}
+            st.session_state["public_speech_transcript_pending"] = False
             st.rerun()
         except ValueError as exc:
             st.error(str(exc))
-        except Exception as exc:
+        except Exception:
+            logging.getLogger(__name__).exception("Public complaint submission failed")
             st.error("The complaint could not be saved. Please try again.")
 
     last = st.session_state.get("last_public_submission")
     if last:
         st.success(f"Your complaint was submitted. Case ID: {last['case_id']}")
+        if last.get("attachment_warning"):
+            st.warning(last["attachment_warning"])
+            pending_upload = st.session_state.get("public_pending_photo_upload") or []
+            if pending_upload and feature_enabled("photos") and st.button("Retry photo upload", key="retry-public-photo-upload"):
+                class RetryUpload:
+                    def __init__(self, name, data):
+                        self.name, self._data = name, data
+
+                    def getvalue(self):
+                        return self._data
+
+                try:
+                    save_attachments(last["complaint_id"],
+                                     [RetryUpload(item["name"], item["data"]) for item in pending_upload],
+                                     user["role"], actor_user=user)
+                    st.session_state.pop("public_pending_photo_upload", None)
+                    st.session_state["last_public_submission"]["attachment_warning"] = None
+                    st.success("Photo evidence was attached to the saved complaint.")
+                    st.rerun()
+                except (ValueError, PermissionError) as exc:
+                    st.error(f"Photo upload still failed: {exc}. Your complaint text remains saved.")
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "Photo retry failed for complaint %s", last["case_id"])
+                    st.error("Photo upload still failed. Your complaint text remains saved; you can retry again.")
         if last.get("area"):
             st.caption(f"Service area: {last['area']}")
         if last["question"]:

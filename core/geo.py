@@ -8,6 +8,14 @@ from .config import ROOT
 from .db import fetch_all, get_conn
 
 STAFF_ROLES = {"government", "operator", "reviewer", "auditor"}
+CITY_WIDE_AREA_CODE = "*"
+DEMO_STAFF_ASSIGNMENTS = {
+    "operator01@staff.nagriksetu-demo.example": "operator",
+    "reviewer01@staff.nagriksetu-demo.example": "reviewer",
+    "auditor01@staff.nagriksetu-demo.example": "auditor",
+}
+DEMO_ASSIGNMENT_ACTOR = "system:demo-admin"
+DEMO_ASSIGNMENT_REASON = "DEMO MODE: pre-approved synthetic assignment for all Gwalior areas."
 
 COVERAGE_PATH = ROOT / "data" / "geo_coverage.json"
 GOV_ALLOWLIST_PATH = ROOT / "data" / "gov_allowlist.csv"
@@ -27,6 +35,84 @@ def area_options() -> dict:
             }
         states[state["code"]] = {"name": state["name"], "cities": cities}
     return states
+
+
+def demo_staff_seed_enabled() -> bool:
+    """Require both demo mode and an explicit opt-in for the demo-only seed."""
+    from .auth import demo_mode
+    enabled = os.environ.get("NYAYAFLOW_SEED_DEMO_STAFF", "0").strip().casefold()
+    return demo_mode() and enabled in {"1", "true", "yes", "on"}
+
+
+def seed_demo_staff_assignments() -> int:
+    """Append city-wide approvals for only the three reserved synthetic accounts."""
+    if not demo_staff_seed_enabled():
+        return 0
+    users = fetch_all(
+        "SELECT u.id,u.email,u.role,u.active,d.registered,d.status,d.role AS directory_role "
+        "FROM users u JOIN staff_directory d ON d.staff_email=u.email "
+        "WHERE lower(u.email) IN (?,?,?)",
+        tuple(DEMO_STAFF_ASSIGNMENTS),
+    )
+    seeded = 0
+    for user in users:
+        email = user["email"].strip().casefold()
+        expected_role = DEMO_STAFF_ASSIGNMENTS.get(email)
+        if (not expected_role or user["role"] != expected_role or user["directory_role"] != expected_role
+                or not user["active"] or not user["registered"] or user["status"] != "active"):
+            continue
+        conn = get_conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            latest = conn.execute(
+                "SELECT id FROM government_area_events WHERE user_id=? AND state_code=? AND city_code=? "
+                "AND area_code=? ORDER BY id DESC LIMIT 1",
+                (user["id"], "mp", "mp-gwalior", CITY_WIDE_AREA_CODE),
+            ).fetchone()
+            # Any prior event, including a revocation, is authoritative. The
+            # seed is one-time and never silently restores access after an admin acts.
+            if latest:
+                conn.commit()
+                continue
+            conn.execute(
+                "INSERT INTO government_area_events "
+                "(user_id,state_code,city_code,area_code,event_type,actor_email,reason) "
+                "VALUES(?,?,?,?,'approved',?,?)",
+                (user["id"], "mp", "mp-gwalior", CITY_WIDE_AREA_CODE,
+                 DEMO_ASSIGNMENT_ACTOR, DEMO_ASSIGNMENT_REASON),
+            )
+            conn.commit()
+            seeded += 1
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    return seeded
+
+
+def known_area_for_location(state_code: str | None, city_code: str | None,
+                            location: str | None) -> dict | None:
+    """Resolve an exact known area name/alias without changing the entered location."""
+    if not state_code or not city_code or not location:
+        return None
+    from .intake import normalize_location
+    aliases = {
+        "mp-gwalior-gole-ka-mandir": {"gole ka mandir", "गोले का मंदिर"},
+    }
+    options = area_options()
+    try:
+        city = options[state_code]["cities"][city_code]
+    except KeyError:
+        return None
+    entered = normalize_location(location)
+    for area_code, area_name in city["areas"].items():
+        candidates = {normalize_location(area_name),
+                      *(normalize_location(alias) for alias in aliases.get(area_code, set()))}
+        if entered in candidates:
+            return {"state_code": state_code, "city_code": city_code,
+                    "area_code": area_code, "area_name": area_name}
+    return None
 
 
 def geography_names(state_code: str, city_code: str, area_code: str) -> dict:
@@ -94,7 +180,10 @@ def _verified_staff(user_id: int, email: str | None = None) -> dict:
 
 
 def _append_event(user_id, state_code, city_code, area_code, event_type, actor_email, reason):
-    names = geography_names(state_code, city_code, area_code)
+    if area_code == CITY_WIDE_AREA_CODE:
+        partial_geography_names(state_code, city_code, None)
+    else:
+        geography_names(state_code, city_code, area_code)
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -129,6 +218,22 @@ def configure_staff_location(user: dict, state_code: str, city_code: str, area_c
     request_id = request_area_assignment(user["id"], state_code, city_code, area_code,
                                          user["email"], reason=reason)
     return {"status": "pending", "request_id": request_id, **names}
+
+
+def select_staff_location(user: dict, state_code: str, city_code: str, area_code: str) -> dict:
+    """Immediately enable an authenticated staff account to view a selected area."""
+    if not user or user.get("role") not in STAFF_ROLES:
+        raise PermissionError("Only a signed-in staff account can select an area.")
+    identity = _verified_staff(user.get("id"), user.get("email"))
+    names = geography_names(state_code, city_code, area_code)
+    existing = staff_area_scope(identity["id"])
+    if any((item["state_code"], item["city_code"], item["area_code"])
+           == (state_code, city_code, area_code) for item in existing):
+        return {"status": "available", **names}
+    _append_event(identity["id"], state_code, city_code, area_code, "approved",
+                  identity["email"],
+                  f"Staff self-selected {names['area_name']} for complaint visibility; no administrator approval required.")
+    return {"status": "available", **names}
 
 
 def staff_location_snapshot(user: dict) -> dict:
@@ -177,15 +282,39 @@ def sync_allowlisted_assignments(user_id: int, email: str) -> int:
 def staff_area_scope(user_id: int) -> list[dict]:
     """Return only areas whose most recent assignment event is an approval."""
     rows = fetch_all(
-        "SELECT e.state_code,e.city_code,e.area_code,e.actor_email,e.reason,e.created_at "
-        "FROM government_area_events e WHERE e.user_id=? AND e.event_type='approved' "
+        "SELECT e.state_code,e.city_code,e.area_code,e.actor_email,e.reason,e.created_at,u.email,u.role "
+        "FROM government_area_events e JOIN users u ON u.id=e.user_id "
+        "WHERE e.user_id=? AND e.event_type='approved' "
         "AND e.id=(SELECT MAX(last.id) FROM government_area_events last WHERE last.user_id=e.user_id "
         "AND last.state_code=e.state_code AND last.city_code=e.city_code AND last.area_code=e.area_code) "
         "ORDER BY e.state_code,e.city_code,e.area_code", (int(user_id),))
+    if any(row["actor_email"] == DEMO_ASSIGNMENT_ACTOR for row in rows):
+        enabled = demo_staff_seed_enabled()
+        rows = [row for row in rows if row["actor_email"] != DEMO_ASSIGNMENT_ACTOR or (
+            enabled and DEMO_STAFF_ASSIGNMENTS.get(row["email"].strip().casefold()) == row["role"])]
     for row in rows:
-        names = geography_names(row["state_code"], row["city_code"], row["area_code"])
+        if row["area_code"] == CITY_WIDE_AREA_CODE:
+            names = {"state_name": area_options()[row["state_code"]]["name"],
+                     "city_name": area_options()[row["state_code"]]["cities"][row["city_code"]]["name"],
+                     "area_name": "All areas (city-wide)"}
+        else:
+            names = geography_names(row["state_code"], row["city_code"], row["area_code"])
         row.update({key: names[key] for key in ("state_name", "city_name", "area_name")})
     return rows
+
+
+def is_demo_citywide_user(user: dict, scope: list[dict] | None = None) -> bool:
+    """Confirm the exact opt-in demo account has an active city-wide demo grant."""
+    if not user or not demo_staff_seed_enabled():
+        return False
+    email = (user.get("email") or "").strip().casefold()
+    if DEMO_STAFF_ASSIGNMENTS.get(email) != user.get("role"):
+        return False
+    scope = scope if scope is not None else staff_area_scope(user.get("id"))
+    return any(row["actor_email"] == DEMO_ASSIGNMENT_ACTOR
+               and row["area_code"] == CITY_WIDE_AREA_CODE
+               and row["state_code"] == "mp" and row["city_code"] == "mp-gwalior"
+               for row in scope)
 
 
 def request_area_assignment(user_id: int, state_code: str, city_code: str, area_code: str,
@@ -327,14 +456,19 @@ def require_complaint_area_access(user: dict, complaint_id: int):
     if not rows:
         raise ValueError("Complaint not found.")
     case = rows[0]
-    if not case["state_code"] or not case["city_code"] or not case["area_code"]:
+    scope = staff_area_scope(user["id"])
+    if not case["state_code"] or not case["city_code"]:
         if not is_geography_admin(user.get("email", "")):
             raise PermissionError("This complaint has no verified area and is restricted to geography administrators.")
     else:
-        scope = {(r["state_code"], r["city_code"], r["area_code"]) for r in staff_area_scope(user["id"])}
-        if (case["state_code"], case["city_code"], case["area_code"]) not in scope:
+        city_wide = any(r["state_code"] == case["state_code"] and r["city_code"] == case["city_code"]
+                        and r["area_code"] == CITY_WIDE_AREA_CODE for r in scope)
+        exact_area = any((r["state_code"], r["city_code"], r["area_code"])
+                         == (case["state_code"], case["city_code"], case["area_code"])
+                         for r in scope)
+        if not city_wide and (not case["area_code"] or not exact_area):
             raise PermissionError("This complaint is outside your assigned area.")
-    if user.get("role") == "operator":
+    if user.get("role") == "operator" and not is_demo_citywide_user(user, scope):
         account = fetch_all("SELECT department FROM users WHERE id=? AND active=1", (user["id"],))
         if not account or not account[0]["department"]:
             raise PermissionError("This officer account has no assigned department.")
@@ -388,8 +522,12 @@ def scoped_complaints(user: dict, *, include_unassigned: bool = False, filters: 
     clauses = []
     params = []
     for area in scope:
-        clauses.append("(c.state_code=? AND c.city_code=? AND c.area_code=?)")
-        params.extend((area["state_code"], area["city_code"], area["area_code"]))
+        if area["area_code"] == CITY_WIDE_AREA_CODE:
+            clauses.append("(c.state_code=? AND c.city_code=?)")
+            params.extend((area["state_code"], area["city_code"]))
+        else:
+            clauses.append("(c.state_code=? AND c.city_code=? AND c.area_code=?)")
+            params.extend((area["state_code"], area["city_code"], area["area_code"]))
     if include_unassigned and is_geography_admin(user.get("email", "")):
         clauses.append("(c.state_code IS NULL OR c.city_code IS NULL OR c.area_code IS NULL)")
     if not clauses:
@@ -402,7 +540,8 @@ def scoped_complaints(user: dict, *, include_unassigned: bool = False, filters: 
         if value:
             where.append(f"{col}=?")
             params.append(value)
-    if user.get("role") == "operator":
+    demo_citywide = is_demo_citywide_user(user, scope)
+    if user.get("role") == "operator" and not demo_citywide:
         department = active[0]["department"]
         if not department:
             raise PermissionError("This officer account has no assigned department.")
@@ -412,7 +551,10 @@ def scoped_complaints(user: dict, *, include_unassigned: bool = False, filters: 
         latest_abstained = "(SELECT s.abstained FROM suggestions s WHERE s.complaint_id=c.id ORDER BY s.id DESC LIMIT 1)"
         suggested_owner = (f"CASE WHEN COALESCE({latest_abstained},1)=0 AND json_valid({latest_top3}) "
                            f"THEN NULLIF(TRIM(json_extract({latest_top3},'$[0].dept')),'') END")
-        where.append(f"COALESCE({final_owner},{suggested_owner})=?")
+        # Unrouted / abstained cases stay in the operator's manual-review queue;
+        # confidently routed work remains constrained to the operator's department.
+        where.append(f"(COALESCE({final_owner},{suggested_owner})=? OR "
+                     f"(COALESCE({latest_abstained},1)=1 AND COALESCE({final_owner},'')=''))")
         params.append(department)
     query = "SELECT c.* FROM complaints c WHERE " + " AND ".join(where) + " ORDER BY c.id DESC"
     rows = fetch_all(query, tuple(params))

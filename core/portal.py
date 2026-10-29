@@ -13,6 +13,11 @@ def list_own_complaints(user_id: int) -> list[dict]:
         "(SELECT l.final_dept FROM ledger l WHERE l.complaint_id=c.id AND l.event_type IN "
         "('accept','edit','clarify','escalate','transfer') ORDER BY l.id DESC LIMIT 1) AS final_dept, "
         "(SELECT COUNT(*) FROM challenges h WHERE h.complaint_id=c.id AND h.status='open') AS open_requests "
+        ", (SELECT h.status FROM challenges h WHERE h.complaint_id=c.id ORDER BY h.id DESC LIMIT 1) AS latest_review_status "
+        ", (SELECT h.outcome FROM challenges h WHERE h.complaint_id=c.id ORDER BY h.id DESC LIMIT 1) AS latest_review_outcome "
+        ", (SELECT h.resolution FROM challenges h WHERE h.complaint_id=c.id ORDER BY h.id DESC LIMIT 1) AS latest_review_resolution "
+        ", (SELECT h.reason_category FROM challenges h WHERE h.complaint_id=c.id ORDER BY h.id DESC LIMIT 1) AS latest_review_reason_category "
+        ", (SELECT h.created_at FROM challenges h WHERE h.complaint_id=c.id ORDER BY h.id DESC LIMIT 1) AS latest_review_submitted_at "
         "FROM complaints c WHERE c.submitted_by=? AND c.parent_id IS NULL AND c.is_active=1 ORDER BY c.id DESC",
         (user_id,))
 
@@ -24,9 +29,10 @@ def get_own_complaint(user_id: int, complaint_id: int) -> dict | None:
     return rows[0] if rows else None
 
 
-def request_own_review(user_id: int, complaint_id: int, reason: str, actor_email: str) -> int:
+def request_own_review(user_id: int, complaint_id: int, reason: str, actor_email: str,
+                       reason_category: str = "other") -> int:
     complaint = get_own_complaint(user_id, complaint_id)
     if not complaint:
         raise ValueError("That complaint is not available in your account.")
     return create_challenge(complaint_id, "citizen", reason, actor_email=actor_email,
-                            citizen_user_id=user_id)
+                            citizen_user_id=user_id, reason_category=reason_category)

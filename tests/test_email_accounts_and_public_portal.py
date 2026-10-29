@@ -9,7 +9,7 @@ from pathlib import Path
 
 from core import auth
 from core.attachment import read_attachment, save_attachment
-from core.db import fetch_all, insert_complaint
+from core.db import fetch_all, insert_complaint, insert_public_submission
 from core import db as dbm
 from core.portal import list_own_complaints
 from core.reviews import submit_review
@@ -67,6 +67,7 @@ def test_old_username_accounts_are_preserved_as_legacy_during_migration(tmp_path
     legacy = dbm.fetch_all("SELECT username,password_hash,role FROM legacy_users WHERE id=1")[0]
     assert legacy == {"username": "old-reviewer", "password_hash": "unchanged-hash", "role": "reviewer"}
     assert "email" in {row["name"] for row in dbm.fetch_all("PRAGMA table_info(users)")}
+    assert "location_normalized" in {row["name"] for row in dbm.fetch_all("PRAGMA table_info(complaints)")}
     assert dbm.fetch_all("SELECT * FROM users") == []
 
 
@@ -101,6 +102,190 @@ def test_public_portal_returns_only_the_owner_cases(db):
     other_id = _complaint("CASE-OTHER", other["id"])
     assert [row["case_id"] for row in list_own_complaints(owner["id"])] == ["CASE-OWN"]
     assert other_id != own_id
+
+
+def test_public_submission_is_atomic_and_visible_after_area_approval(db, staff_user, monkeypatch):
+    from core.geo import approve_area_request, configure_staff_location
+    from core.staff_dashboard import list_staff_cases
+    from pathlib import Path
+
+    resident = auth.register_user("streetlight-resident@example.test", "Resident", "Secure!River72",
+                                  password_confirm="Secure!River72")
+    original = "  the streetlight is not working in my area \r\n"
+    root = Path(__file__).resolve().parent.parent
+    app = AppTest.from_file(root / "pages/10_Public_Portal.py", default_timeout=30)
+    app.session_state["authenticated_user"] = resident
+    app.run()
+    assert not app.exception
+    app.selectbox(key="resident-complaint-state").select_index(1).run()
+    app.selectbox(key="resident-complaint-city-mp").select_index(1).run()
+    app.selectbox(key="resident-complaint-area-mp-gwalior").select_index(2).run()
+    app.text_area[0].set_value(original)
+    app.form_submit_button[0].click().run()
+    assert not app.exception
+    assert any("Your complaint was submitted" in item.value for item in app.success)
+    case_id = app.session_state["last_public_submission"]["case_id"]
+    complaint_id = fetch_all("SELECT id FROM complaints WHERE case_id=?", (case_id,))[0]["id"]
+
+    abstained_text = "gibberish xyz 123"
+    app.text_area[0].set_value(abstained_text)
+    app.form_submit_button[0].click().run()
+    assert not app.exception
+    abstained_case_id = app.session_state["last_public_submission"]["case_id"]
+    abstained_id = fetch_all("SELECT id FROM complaints WHERE case_id=?", (abstained_case_id,))[0]["id"]
+
+    # The submission is committed with its suggestion and ledger event together.
+    stored = fetch_all("SELECT * FROM complaints WHERE id=?", (complaint_id,))[0]
+    suggestion = fetch_all("SELECT * FROM suggestions WHERE complaint_id=?", (complaint_id,))[0]
+    ledger = fetch_all("SELECT * FROM ledger WHERE complaint_id=? ORDER BY id", (complaint_id,))
+    assert stored["original_text"] == original
+    assert stored["case_id"] == case_id
+    assert stored["location"] == "Gole Ka Mandir"
+    assert stored["location_normalized"] == "gole ka mandir"
+    assert (stored["state_code"], stored["city_code"], stored["area_code"]) == (
+        "mp", "mp-gwalior", "mp-gwalior-gole-ka-mandir")
+    assert suggestion["abstained"] == 0
+    assert ledger[0]["event_type"] == "suggested"
+
+    officer = staff_user("operator", "Electricity Dept")
+    request = configure_staff_location(officer, "mp", "mp-gwalior",
+                                       "mp-gwalior-gole-ka-mandir", "Verified test scope")
+    assert request["status"] == "pending"
+    assert list_staff_cases(officer) == []
+
+    admin = staff_user("reviewer", "Grievance Cell")
+    approve_area_request(request["request_id"], admin["email"], "Approved synthetic Gwalior test scope")
+    cases = list_staff_cases(officer)
+    operator_cases = {case["id"]: case for case in cases}
+    assert complaint_id in operator_cases and abstained_id in operator_cases
+    assert operator_cases[complaint_id]["original_text"] == original
+    assert operator_cases[complaint_id]["location"] == "Gole Ka Mandir"
+    assert operator_cases[complaint_id]["language"] == "english"
+    assert operator_cases[complaint_id]["channel"] == "portal"
+    assert operator_cases[abstained_id]["uncertain"] is True
+
+    # Abstained submissions remain visible in the human review queue, even
+    # though they have no department assignment for an operator inbox.
+    reviewer = staff_user("reviewer", "Grievance Cell")
+    review_request = configure_staff_location(reviewer, "mp", "mp-gwalior",
+                                              "mp-gwalior-gole-ka-mandir", "Verified test scope")
+    approve_area_request(review_request["request_id"], admin["email"], "Approved synthetic Gwalior test scope")
+    review_cases = {case["id"]: case for case in list_staff_cases(reviewer)}
+    assert complaint_id in review_cases
+    assert review_cases[complaint_id]["original_text"] == original
+    assert review_cases[complaint_id]["location"] == "Gole Ka Mandir"
+    assert abstained_id in review_cases
+    assert review_cases[abstained_id]["original_text"] == abstained_text
+    assert review_cases[abstained_id]["location"] == "Gole Ka Mandir"
+    assert review_cases[abstained_id]["uncertain"] is True
+    assert review_cases[abstained_id]["suggested_department"] is None
+    assert operator_cases[complaint_id]["suggested_department"] == "Electricity Dept"
+
+
+def test_public_form_resolves_normalized_english_and_hindi_area_aliases_without_rewriting_location(db):
+    from pathlib import Path
+
+    resident = auth.register_user("area-alias-resident@example.test", "Resident", "Secure!River72",
+                                  password_confirm="Secure!River72")
+    root = Path(__file__).resolve().parent.parent
+    for location in ("  Gole   ka Mandir  ", "गोले का मंदिर"):
+        app = AppTest.from_file(root / "pages/10_Public_Portal.py", default_timeout=30)
+        app.session_state["authenticated_user"] = resident
+        app.run()
+        app.selectbox(key="resident-complaint-state").select_index(1).run()
+        app.selectbox(key="resident-complaint-city-mp").select_index(1).run()
+        # Leave the structured area as unknown; exact normalized name/alias may
+        # supply its known code while the original location value remains intact.
+        app.selectbox(key="resident-complaint-area-mp-gwalior").select_index(0).run()
+        app.text_area[0].set_value("There is a pothole here.")
+        location_input = next(item for item in app.text_input if item.label == "Street or nearby landmark (optional)")
+        location_input.set_value(location)
+        app.form_submit_button[0].click().run()
+        assert not app.exception
+        case_id = app.session_state["last_public_submission"]["case_id"]
+        stored = fetch_all("SELECT location,area_code,area_name,state_code,city_code FROM complaints WHERE case_id=?",
+                           (case_id,))[0]
+        assert stored["location"] == location
+        assert stored["area_code"] == "mp-gwalior-gole-ka-mandir"
+        assert stored["area_name"] == "Gole Ka Mandir"
+        assert (stored["state_code"], stored["city_code"]) == ("mp", "mp-gwalior")
+
+
+def test_public_submission_rolls_back_if_suggestion_or_ledger_write_fails(db):
+    from core import intake, router_baseline
+
+    rec = intake.process("streetlight is broken", "portal", "Gole Ka Mandir")
+    rec.update({"case_id": "CASE-ROLLBACK", "state_code": "mp", "state_name": "Madhya Pradesh",
+                "city_code": "mp-gwalior", "city_name": "Gwalior",
+                "area_code": "mp-gwalior-gole-ka-mandir", "area_name": "Gole Ka Mandir"})
+    db.execute("CREATE TRIGGER reject_suggestion BEFORE INSERT ON suggestions "
+               "BEGIN SELECT RAISE(ABORT, 'simulated suggestion write failure'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="simulated suggestion write failure"):
+        insert_public_submission(rec, router_baseline.route(rec["original_text"]))
+    assert fetch_all("SELECT id FROM complaints WHERE case_id='CASE-ROLLBACK'") == []
+    assert fetch_all("SELECT id FROM suggestions WHERE complaint_id NOT IN (SELECT id FROM complaints)") == []
+
+
+def test_public_form_displays_error_and_saves_no_case_when_database_write_fails(db):
+    from pathlib import Path
+
+    resident = auth.register_user("failed-submit@example.test", "Resident", "Secure!River72",
+                                  password_confirm="Secure!River72")
+    db.execute("CREATE TRIGGER reject_suggestion BEFORE INSERT ON suggestions "
+               "BEGIN SELECT RAISE(ABORT, 'simulated suggestion write failure'); END")
+    app = AppTest.from_file(Path(__file__).resolve().parent.parent / "pages/10_Public_Portal.py",
+                            default_timeout=30)
+    app.session_state["authenticated_user"] = resident
+    app.run()
+    app.selectbox(key="resident-complaint-state").select_index(1).run()
+    app.selectbox(key="resident-complaint-city-mp").select_index(1).run()
+    app.selectbox(key="resident-complaint-area-mp-gwalior").select_index(2).run()
+    original = "the streetlight is not working in my area"
+    app.text_area[0].set_value(original)
+    app.form_submit_button[0].click().run()
+
+    assert not app.exception
+    assert any("could not be saved" in item.value for item in app.error)
+    assert not any("Your complaint was submitted" in item.value for item in app.success)
+    assert fetch_all("SELECT id FROM complaints WHERE submitted_by=? AND original_text=?",
+                     (resident["id"], original)) == []
+
+
+def test_location_normalization_is_separate_and_preserves_entered_value():
+    from core.intake import process
+
+    rec = process("Streetlight is broken", "portal", "  Gole   Ka Mandir  ")
+    assert rec["location"] == "  Gole   Ka Mandir  "
+    assert rec["location_normalized"] == "gole ka mandir"
+
+
+def test_location_normalization_migration_backfills_existing_rows(tmp_path, monkeypatch):
+    path = tmp_path / "pre-location-normalization.db"
+    monkeypatch.setattr(dbm, "DB_PATH", path)
+    dbm.init_db()
+    conn = dbm.get_conn()
+    try:
+        conn.execute("DROP INDEX idx_complaints_location_normalized")
+        conn.execute("ALTER TABLE complaints DROP COLUMN location_normalized")
+        conn.execute("INSERT INTO complaints(case_id,original_text,language,location) "
+                     "VALUES('CASE-OLD-LOCATION','old text','english','  Cafe\u0301   Square  ')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    dbm.init_db()
+    migrated = dbm.fetch_all(
+        "SELECT location,location_normalized FROM complaints WHERE case_id='CASE-OLD-LOCATION'")[0]
+    assert migrated == {"location": "  Cafe\u0301   Square  ", "location_normalized": "café square"}
+
+
+def test_demo_geography_admin_is_an_active_registrable_reviewer(db):
+    from core.geo import is_geography_admin
+
+    email = "reviewer05@staff.nagriksetu-demo.example"
+    rows = fetch_all("SELECT role,status FROM staff_directory WHERE staff_email=?", (email,))
+    assert rows == [{"role": "reviewer", "status": "active"}]
+    assert is_geography_admin(email)
 
 
 def test_resident_cannot_create_review_request_for_someone_elses_case(db):

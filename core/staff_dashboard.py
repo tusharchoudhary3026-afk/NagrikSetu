@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 from .auth import STAFF_ROLES, get_active_user
 from .config import REASON_CODES
 from .db import fetch_all, get_conn
-from .geo import is_geography_admin, scoped_complaints
+from .geo import is_demo_citywide_user, is_geography_admin, scoped_complaints
+from .intake import normalize_location
 from .ownership import check_suggestions, detect_bounce, repeat_reassignment
 from .safety import flag_safety
 from .suggestions import selected_department
@@ -135,7 +136,9 @@ def _load_scoped_rows(actor):
             "top3": top3,
             "suggested_department": selected,
             "current_department": current_owner,
-            "uncertain": bool(suggestion and suggestion["abstained"]),
+            # Missing routing output is manual review too; it must never appear as
+            # a confidently routed case just because a suggestion row is absent.
+            "uncertain": suggestion is None or bool(suggestion["abstained"]),
             "open_challenges": open_challenges,
             "status": status,
             "last_action": last_action,
@@ -144,12 +147,13 @@ def _load_scoped_rows(actor):
             "ownership_conflicts": overlaps,
             "sla": _sla(row.get("created_at"), status == "resolved"),
         })
-        # Operators are constrained to the persisted department assignment. A
-        # reviewer/auditor sees only the geography their role is authorized for.
+        # Operators see their department's routed work plus uncertain cases in
+        # the manual queue. A reviewer/auditor sees only authorized geography.
         if actor["role"] == "operator":
             if not actor.get("department"):
                 raise PermissionError("This officer account has no assigned department.")
-            if current_owner != actor["department"]:
+            if (current_owner != actor["department"] and not enriched["uncertain"]
+                    and not is_demo_citywide_user(actor)):
                 continue
         result.append(enriched)
     return result
@@ -159,11 +163,11 @@ def list_staff_cases(user, filters=None):
     actor = _actor(user)
     rows = _load_scoped_rows(actor)
     filters = filters or {}
-    query = str(filters.get("search") or "").strip().casefold()
+    query = normalize_location(str(filters.get("search") or "")) or ""
     for row in rows:
-        row["_search"] = " ".join(str(row.get(key) or "") for key in
-                                  ("case_id", "original_text", "issue", "location", "area_name",
-                                   "state_name", "city_name", "current_department")).casefold()
+        row["_search"] = normalize_location(" ".join(str(row.get(key) or "") for key in
+                                  ("case_id", "original_text", "issue", "location", "location_normalized",
+                                   "area_name", "state_name", "city_name", "current_department"))) or ""
     if query:
         rows = [row for row in rows if query in row["_search"]]
     for key in ("status", "area_name", "issue", "language"):

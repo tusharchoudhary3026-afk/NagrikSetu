@@ -1,4 +1,4 @@
-# Acceptance test run 2026-10-29 02:00
+# Acceptance test run 2026-10-29 16:57
 
 | Test | Outcome |
 |---|---|
@@ -12,19 +12,26 @@
 | test_AT08_overlap_flagged_with_source | PASSED |
 | test_E6_bounce_pattern | PASSED |
 | test_logged_out_app_shell_keeps_navigation_registered_and_shows_login | PASSED |
+| test_relative_database_override_resolves_from_project_root | PASSED |
 | test_opening_protected_file_page_without_session_shows_sign_in_link | PASSED |
 | test_reviewer_can_open_the_role_filtered_navigation | PASSED |
+| test_demo_staff_home_shows_preapproved_city_assignment_without_warning | PASSED |
+| test_staff_can_select_area_and_see_complaints_without_admin_approval | PASSED |
+| test_each_demo_staff_role_sees_public_case_in_the_streamlit_staff_view | PASSED |
 | test_every_page_starts_headlessly_with_a_permitted_session | PASSED |
 | test_full_dataframe_fit_uses_training_split_only | PASSED |
 | test_duplicate_pair_metrics_are_reported_from_frozen_test_pairs | PASSED |
 | test_full_evaluation_has_a_configured_threshold_artifact_path | PASSED |
 | test_full_evaluation_executes_against_the_frozen_test_split | PASSED |
 | test_ledger_database_triggers_refuse_updates_and_deletes | PASSED |
+| test_automatic_final_actions_are_rejected_by_service_and_database | PASSED |
 | test_automatic_final_actions_are_rejected_without_mutation | PASSED |
 | test_same_street_different_numbered_asset_is_a_hard_conflict | PASSED |
 | test_duplicate_candidate_outcomes_are_review_labels_only | PASSED |
 | test_intake_strips_articles_and_rejects_generic_road_as_location | PASSED |
 | test_intake_extracts_devanagari_ward_and_landmark | PASSED |
+| test_intake_preserves_unicode_and_markup_characters_in_original_text | PASSED |
+| test_duplicate_location_match_uses_normalized_field | PASSED |
 | test_intake_issue_extraction_exposes_matched_words | PASSED |
 | test_requested_action_examples_are_positive_and_missing_action_stays_unspecified | PASSED |
 | test_duplicate_decision_requires_a_structured_reason_code | PASSED |
@@ -89,10 +96,29 @@
 | test_public_account_cannot_pass_government_role_check | PASSED |
 | test_public_can_open_portal_but_not_government_page | PASSED |
 | test_public_portal_returns_only_the_owner_cases | PASSED |
+| test_public_submission_is_atomic_and_visible_after_area_approval | PASSED |
+| test_public_form_resolves_normalized_english_and_hindi_area_aliases_without_rewriting_location | PASSED |
+| test_public_submission_rolls_back_if_suggestion_or_ledger_write_fails | PASSED |
+| test_public_form_displays_error_and_saves_no_case_when_database_write_fails | PASSED |
+| test_location_normalization_is_separate_and_preserves_entered_value | PASSED |
+| test_location_normalization_migration_backfills_existing_rows | PASSED |
+| test_demo_geography_admin_is_an_active_registrable_reviewer | PASSED |
 | test_resident_cannot_create_review_request_for_someone_elses_case | PASSED |
 | test_government_email_is_written_as_review_ledger_actor | PASSED |
 | test_photo_validation_size_extension_and_exif_removal | PASSED |
+| test_feature_flags_are_explicit_and_rbac_cannot_be_disabled | PASSED |
+| test_hotspot_signals_use_canonical_area_keys_and_documented_rule | PASSED |
+| test_hotspot_signals_report_insufficient_data_and_keep_unknown_bucket | PASSED |
+| test_citizen_review_request_records_category_and_outcome_for_owner | PASSED |
+| test_review_split_action_creates_children_atomically_and_preserves_parent | PASSED |
+| test_correction_list_is_scoped_and_training_version_is_reported | PASSED |
+| test_photo_failure_can_be_retried_without_losing_saved_complaint | PASSED |
+| test_new_pages_are_role_gated_and_feature_flags_can_hide_them | PASSED |
+| test_routing_review_queue_page_has_split_action_and_staff_assignment_ui | PASSED |
 | test_geo_options_are_cascading_and_include_requested_gwalior_localities | PASSED |
+| test_demo_staff_seed_is_opt_in_exact_account_only_and_idempotent | PASSED |
+| test_demo_accounts_see_city_complaints_and_manual_queue_without_role_leakage | PASSED |
+| test_demo_seed_stays_off_without_demo_mode_and_new_staff_keeps_area_gate | PASSED |
 | test_partial_public_location_stays_partial_instead_of_being_invented | PASSED |
 | test_staff_location_request_is_pending_and_has_no_complaint_access | PASSED |
 | test_verified_staff_only_sees_and_can_act_on_assigned_area | PASSED |
@@ -112,6 +138,7 @@
 | test_staff_login_lands_on_operations_dashboard_not_public_submission | PASSED |
 | test_case_detail_includes_ownership_source_safety_and_read_only_timeline | PASSED |
 | test_operator_duplicate_candidates_do_not_query_other_departments | PASSED |
+| test_uncertain_languages_compound_duplicate_and_missing_area_remain_visible | PASSED |
 | test_duplicate_candidate_evidence_and_no_automatic_link | PASSED |
 | test_duplicate_decision_requires_reason_and_preserves_reversible_history | PASSED |
 | test_duplicate_candidate_different_date_is_suppressed_and_scores_are_not_probabilities | PASSED |

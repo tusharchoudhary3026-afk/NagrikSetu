@@ -6,7 +6,8 @@ import pandas as pd
 import streamlit as st
 
 from .auth import verify_permission
-from .config import REASON_CODES
+from .config import REASON_CODES, feature_enabled
+from .intake import normalize_location
 from .privacy import mask_text
 from .staff_dashboard import (get_dashboard_summary, get_staff_case_detail,
                               get_ward_hotspots, list_staff_cases, _parse_time,
@@ -30,18 +31,18 @@ def render_staff_dashboard(user):
     """Render one scoped, actionable workspace inside the existing Overview page."""
     rows = list_staff_cases(user)
     summary = get_dashboard_summary(user)
-    hotspots = get_ward_hotspots(user)
+    hotspots = get_ward_hotspots(user) if feature_enabled("hotspots") else []
     areas = sorted({row.get("area_name") or row.get("location") or "Area not recorded" for row in rows})
     issues = sorted({row.get("issue") or "Uncategorized" for row in rows})
     render_hero("Government staff workspace", "Complaint operations",
-                "Review authorized complaints, take accountable actions, and follow the immutable case history.")
+                "Review complaints in your selected locations, take accountable actions, and follow the immutable case history.")
     if user.get("role") == "operator":
         access_label = f"Officer department: {user.get('department') or 'not assigned'}"
     elif user.get("role") == "auditor":
-        access_label = "Read-only audit scope: authorized departments within verified service areas"
+        access_label = "Read-only audit scope: assigned departments within selected service areas"
     else:
-        access_label = "Review scope: authorized departments within verified service areas"
-    st.caption(f"Signed in as {user.get('name') or user.get('email')} · {user.get('role', '').title()} · {access_label}")
+        access_label = "Review scope: assigned departments within selected service areas"
+    st.caption(f"Access scope: {access_label}")
     st.info("DEMO SLA assumption · deadlines are configurable prototype targets, not official service guarantees.",
             icon="⏱️")
 
@@ -51,7 +52,8 @@ def render_staff_dashboard(user):
     for column, (label, key) in zip(metric_cols, metrics):
         column.metric(label, summary[key])
 
-    with st.container(border=True):
+    if feature_enabled("hotspots"):
+      with st.container(border=True):
         st.markdown('<div class="nf-section-kicker">WARD HOTSPOT SUMMARY · SCOPED</div>',
                     unsafe_allow_html=True)
         st.caption("Pending report counts in the latest 7 days; compared with the preceding 7-day period. "
@@ -73,11 +75,12 @@ def render_staff_dashboard(user):
                     if item["issue"] in issues:
                         st.session_state["staff-inbox-issue"] = item["issue"]
                     st.rerun()
+        st.page_link("pages/13_Hotspots.py", label="Open hotspot analysis", icon="📈")
 
     st.subheader("Officer inbox")
-    st.caption(f"Showing {len(rows)} complaints authorized for your role, assigned department, and verified areas.")
+    st.caption(f"Showing {len(rows)} complaints visible for your role, assigned department, and selected areas.")
     if not rows:
-        st.success("No complaints are currently assigned to your department and verified service areas.")
+        st.success("No complaints are currently visible for your department and selected areas.")
         return
 
     statuses = sorted({row["status"] for row in rows})
@@ -107,9 +110,10 @@ def render_staff_dashboard(user):
 
     visible = rows
     if search:
-        term = search.casefold()
-        visible = [row for row in visible if term in " ".join(str(row.get(key) or "") for key in
-                   ("case_id", "original_text", "issue", "location", "area_name")).casefold()]
+        term = normalize_location(search) or ""
+        visible = [row for row in visible if term in (normalize_location(" ".join(
+                   str(row.get(key) or "") for key in
+                   ("case_id", "original_text", "issue", "location", "location_normalized", "area_name"))) or "")]
     if status != "All statuses":
         visible = [row for row in visible if row["status"] == status]
     if area != "All authorized areas":
@@ -172,7 +176,7 @@ def render_staff_dashboard(user):
             st.write(f"**Suggested department:** {detail['suggested_department'] or 'No selected suggestion'}")
             st.write(f"**Current department:** {detail['current_department'] or 'Not assigned'}")
             if detail["uncertain"]:
-                st.warning("The routing engine abstained. A human decision is required.")
+                st.warning("No usable routing suggestion is available. A human decision is required.")
         if detail["routing_history"]:
             st.markdown("**Routing evidence and uncertainty**")
             for item in detail["routing_history"]:
