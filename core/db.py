@@ -1,6 +1,8 @@
+import csv
 import json
 import sqlite3
-from .config import DB_PATH, SCHEMA_PATH
+from pathlib import Path
+from .config import DB_PATH, ROOT, SCHEMA_PATH
 
 
 def get_conn():
@@ -25,12 +27,27 @@ def init_db():
                     raise RuntimeError("Both legacy and old users tables exist; refusing ambiguous migration.")
                 conn.execute("ALTER TABLE users RENAME TO legacy_users")
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        duplicate_review_columns = {row["name"] for row in conn.execute("PRAGMA table_info(duplicate_reviews)")}
+        if "reason_code" not in duplicate_review_columns:
+            conn.execute("ALTER TABLE duplicate_reviews ADD COLUMN reason_code TEXT NOT NULL DEFAULT 'legacy_reason'")
         user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
         if "active" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+        # Additive auth hardening; old accounts and password hashes remain intact.
+        for name, declaration in {
+            "phone": "TEXT", "phone_verified": "INTEGER NOT NULL DEFAULT 0", "department": "TEXT"
+        }.items():
+            if name not in user_columns:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {name} {declaration}")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_phone_unique ON users(phone) WHERE phone IS NOT NULL")
         complaint_columns = {row["name"] for row in conn.execute("PRAGMA table_info(complaints)")}
-        if "is_active" not in complaint_columns:
-            conn.execute("ALTER TABLE complaints ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+        for name, declaration in {
+            "is_active": "INTEGER NOT NULL DEFAULT 1",
+            "state_code": "TEXT", "state_name": "TEXT", "city_code": "TEXT",
+            "city_name": "TEXT", "area_code": "TEXT", "area_name": "TEXT",
+        }.items():
+            if name not in complaint_columns:
+                conn.execute(f"ALTER TABLE complaints ADD COLUMN {name} {declaration}")
         if "submitted_by" not in complaint_columns:
             conn.execute("ALTER TABLE complaints ADD COLUMN submitted_by INTEGER REFERENCES users(id)")
         attachment_columns = {row["name"] for row in conn.execute("PRAGMA table_info(attachments)")}
@@ -59,15 +76,33 @@ def init_db():
             if name not in correction_columns:
                 conn.execute(f"ALTER TABLE corrections ADD COLUMN {name} {declaration}")
         conn.commit()
+        # The pseudo directory is a one-time seed. INSERT OR IGNORE deliberately
+        # preserves any existing row and its registered status across restarts.
+        directory_path = ROOT / "data" / "staff_directory.csv"
+        if directory_path.is_file():
+            with directory_path.open("r", encoding="utf-8-sig", newline="") as stream:
+                for row in csv.DictReader(stream):
+                    email = (row.get("staff_email") or "").strip().lower()
+                    if not email:
+                        continue
+                    conn.execute(
+                        "INSERT OR IGNORE INTO staff_directory"
+                        "(staff_email,full_name,role,department,status,registered,tag) VALUES(?,?,?,?,?,?,?)",
+                        (email, (row.get("full_name") or "").strip(), (row.get("role") or "").strip().lower(),
+                         (row.get("department") or "").strip(), (row.get("status") or "").strip().lower(),
+                         int((row.get("registered") or "0").strip() == "1"),
+                         (row.get("tag") or "SYNTHETIC").strip().upper()))
+            conn.commit()
     finally:
         conn.close()
 
 
 def insert_complaint(rec: dict, submitted_by: int | None = None) -> int:
     cols = ["case_id", "parent_id", "original_text", "language", "normalized_text",
-            "channel", "location", "issue", "requested_action", "missing_fields", "is_synthetic", "submitted_by"]
+            "channel", "location", "issue", "requested_action", "missing_fields", "is_synthetic", "submitted_by",
+            "state_code", "state_name", "city_code", "city_name", "area_code", "area_name"]
     vals = [rec.get(k) for k in cols]
-    vals[-1] = submitted_by if submitted_by is not None else rec.get("submitted_by")
+    vals[11] = submitted_by if submitted_by is not None else rec.get("submitted_by")
     conn = get_conn()
     try:
         cur = conn.execute(

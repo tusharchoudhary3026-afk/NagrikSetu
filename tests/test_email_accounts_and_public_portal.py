@@ -24,29 +24,34 @@ def _complaint(case_id, submitted_by=None):
     }, submitted_by=submitted_by)
 
 
+def _staff_account(email, name="Staff", role="reviewer"):
+    from core.db import execute
+    execute("INSERT OR IGNORE INTO staff_directory(staff_email,full_name,role,department,status,registered,tag) "
+            "VALUES(?,?,?,'Grievance Cell','active',0,'SYNTHETIC')", (email, name, role))
+    flow = auth.begin_staff_registration(email, name, "Secure!River72", "Secure!River72")
+    return auth.verify_staff_registration(email, flow["simulated_code"])
+
+
 def test_email_password_hash_and_verification():
-    encoded = auth.hash_password("example-password")
-    assert encoded != "example-password"
-    assert auth.verify_password("example-password", encoded)
+    encoded = auth.hash_password("Secure!River72")
+    assert encoded != "Secure!River72"
+    assert auth.verify_password("Secure!River72", encoded)
     assert not auth.verify_password("wrong-password", encoded)
 
 
 def test_email_login_locks_after_five_failed_attempts(db):
-    auth.register_user("resident@example.test", "Resident", "example-password",
-                       password_confirm="example-password")
+    auth.register_user("resident@example.test", "Resident", "Secure!River72",
+                       password_confirm="Secure!River72")
     for _ in range(5):
         assert auth.authenticate_email("resident@example.test", "wrong-password") is None
     with pytest.raises(auth.LoginLockedError):
-        auth.authenticate_email("resident@example.test", "example-password")
+        auth.authenticate_email("resident@example.test", "Secure!River72")
 
 
-def test_unverified_government_registration_is_public(db, monkeypatch):
-    monkeypatch.setattr(auth, "government_allowlisted", lambda email: False)
-    account = auth.register_user("not-listed@example.test", "Resident", "example-password",
-                                 password_confirm="example-password", requested_role="government",
-                                 invite_code="invalid")
-    assert account["role"] == "public"
-    assert not account["government_access_verified"]
+def test_staff_role_cannot_be_requested_from_public_registration(db):
+    with pytest.raises(ValueError, match="always citizen"):
+        auth.register_user("not-listed@example.test", "Resident", "Secure!River72",
+                           password_confirm="Secure!River72", requested_role="government")
 
 
 def test_old_username_accounts_are_preserved_as_legacy_during_migration(tmp_path, monkeypatch):
@@ -66,15 +71,15 @@ def test_old_username_accounts_are_preserved_as_legacy_during_migration(tmp_path
 
 
 def test_public_account_cannot_pass_government_role_check(db, monkeypatch):
-    account = auth.register_user("resident@example.test", "Resident", "example-password",
-                                 password_confirm="example-password")
+    account = auth.register_user("resident@example.test", "Resident", "Secure!River72",
+                                 password_confirm="Secure!River72")
     assert not auth.role_allowed(account, "government")
     assert auth.role_allowed(account, "public")
 
 
 def test_public_can_open_portal_but_not_government_page(db):
-    account = auth.register_user("resident@example.test", "Resident", "example-password",
-                                 password_confirm="example-password")
+    account = auth.register_user("resident@example.test", "Resident", "Secure!River72",
+                                 password_confirm="Secure!River72")
     root = Path(__file__).resolve().parent.parent
     app = AppTest.from_file(root / "app.py", default_timeout=20)
     app.session_state["authenticated_user"] = account
@@ -84,30 +89,58 @@ def test_public_can_open_portal_but_not_government_page(db):
     assert any("Submit a civic concern" in item.value for item in app.markdown)
     app.switch_page("pages/9_Security.py").run()
     assert not app.exception
-    assert any("isn't available to your account" in item.value for item in app.markdown)
+    assert any("isn&#x27;t available to your account" in item.value for item in app.markdown)
 
 
 def test_public_portal_returns_only_the_owner_cases(db):
-    owner = auth.register_user("one@example.test", "One", "example-password",
-                               password_confirm="example-password")
-    other = auth.register_user("two@example.test", "Two", "example-password",
-                               password_confirm="example-password")
+    owner = auth.register_user("one@example.test", "One", "Secure!River72",
+                               password_confirm="Secure!River72")
+    other = auth.register_user("two@example.test", "Two", "Secure!River72",
+                               password_confirm="Secure!River72")
     own_id = _complaint("CASE-OWN", owner["id"])
     other_id = _complaint("CASE-OTHER", other["id"])
     assert [row["case_id"] for row in list_own_complaints(owner["id"])] == ["CASE-OWN"]
     assert other_id != own_id
 
 
-def test_government_email_is_written_as_review_ledger_actor(db):
-    complaint_id = _complaint("CASE-ACTOR")
-    submit_review(complaint_id, "government", "accept", "Roads Dept", actor_email="staff@example.test")
+def test_resident_cannot_create_review_request_for_someone_elses_case(db):
+    owner = auth.register_user("owner@example.test", "Owner", "Secure!River72",
+                               password_confirm="Secure!River72")
+    other = auth.register_user("other@example.test", "Other", "Secure!River72",
+                               password_confirm="Secure!River72")
+    cid = _complaint("CASE-PRIVATE", owner["id"])
+    from core.challenges import create_challenge
+    with pytest.raises(PermissionError, match="only for their own"):
+        create_challenge(cid, "citizen", "Please check this", actor_email=other["email"],
+                         citizen_user_id=other["id"])
+
+
+def test_government_email_is_written_as_review_ledger_actor(db, monkeypatch):
+    staff = _staff_account("reviewer06@staff.nagriksetu-demo.example", "Staff")
+    from core.geo import approve_area_request, request_area_assignment
+    from core import geo
+    geo_admins = "reviewer07@staff.nagriksetu-demo.example"
+    monkeypatch.setenv("NYAYAFLOW_GEO_ADMIN_EMAILS", geo_admins)
+    admin = _staff_account(geo_admins, "Admin")
+    request_id = request_area_assignment(staff["id"], "mp", "mp-gwalior", "mp-gwalior-morar", staff["email"])
+    approve_area_request(request_id, admin["email"], "Verified for test")
+    complaint_id = insert_complaint({
+        "case_id": "CASE-ACTOR", "original_text": "Streetlight is broken", "language": "english",
+        "normalized_text": "streetlight is broken", "channel": "portal", "location": "Morar",
+        "issue": "electricity", "requested_action": "repair", "missing_fields": "", "is_synthetic": 1,
+        "state_code": "mp", "city_code": "mp-gwalior", "area_code": "mp-gwalior-morar",
+    })
+    submit_review(complaint_id, "reviewer", "accept", "Roads Dept", actor_email=staff["email"],
+                  actor_user=staff)
     row = fetch_all("SELECT actor FROM ledger WHERE complaint_id=?", (complaint_id,))[0]
-    assert row["actor"] == "staff@example.test"
+    assert row["actor"] == staff["email"]
 
 
 def test_photo_validation_size_extension_and_exif_removal(db, monkeypatch, tmp_path):
     monkeypatch.setenv("NYAYAFLOW_ATTACHMENT_KEY", secrets.token_hex(32))
     monkeypatch.setattr("core.attachment.ATTACHMENT_DIR", tmp_path)
+    reviewer = _staff_account("reviewer01@staff.nagriksetu-demo.example", "Photo Reviewer")
+    monkeypatch.setenv("NYAYAFLOW_GEO_ADMIN_EMAILS", reviewer["email"])
     complaint_id = _complaint("CASE-PHOTO")
 
     bad_extension = io.BytesIO(b"not image")
@@ -125,8 +158,9 @@ def test_photo_validation_size_extension_and_exif_removal(db, monkeypatch, tmp_p
     image = io.BytesIO()
     Image.new("RGB", (3, 3), "red").save(image, format="PNG", exif=exif)
     image.name = "evidence.png"
-    attachment_id = save_attachment(complaint_id, image, "operator")
+    attachment_id = save_attachment(complaint_id, image, "reviewer", actor_user=reviewer)
     assert (tmp_path / attachment_id).is_file()
     clean = Image.open(io.BytesIO(read_attachment(
-        fetch_all("SELECT id FROM attachments WHERE filename=?", (attachment_id,))[0]["id"], "reviewer")))
+        fetch_all("SELECT id FROM attachments WHERE filename=?", (attachment_id,))[0]["id"], "reviewer",
+        actor_user=reviewer)))
     assert not clean.getexif()

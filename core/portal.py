@@ -5,7 +5,7 @@ from .db import fetch_all
 
 def list_own_complaints(user_id: int) -> list[dict]:
     return fetch_all(
-        "SELECT c.id,c.case_id,c.original_text,c.language,c.location,c.issue,c.created_at, "
+        "SELECT c.id,c.case_id,c.original_text,c.language,c.location,c.issue,c.state_name,c.city_name,c.area_name,c.created_at, "
         "(SELECT s.top3 FROM suggestions s WHERE s.complaint_id=c.id ORDER BY s.id DESC LIMIT 1) AS top3, "
         "(SELECT s.abstained FROM suggestions s WHERE s.complaint_id=c.id ORDER BY s.id DESC LIMIT 1) AS abstained, "
         "(SELECT l.event_type FROM ledger l WHERE l.complaint_id=c.id AND l.event_type IN "
@@ -28,4 +28,5 @@ def request_own_review(user_id: int, complaint_id: int, reason: str, actor_email
     complaint = get_own_complaint(user_id, complaint_id)
     if not complaint:
         raise ValueError("That complaint is not available in your account.")
-    return create_challenge(complaint_id, "citizen", reason, actor_email=actor_email)
+    return create_challenge(complaint_id, "citizen", reason, actor_email=actor_email,
+                            citizen_user_id=user_id)

@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 db/nyayaflow.db
+db/nyayaflow-*.db
+db/backups/*.db
 .venv/
 .venv-run/
 data/attachments/

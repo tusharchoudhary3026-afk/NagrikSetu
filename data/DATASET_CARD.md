@@ -13,7 +13,16 @@
 - These rows test rule behavior only. They are not independently labelled, representative safety reports, or evidence of real-world safety recall. The evaluation page displays their actual numerator and denominator under a synthetic sanity-check label.
 
 ## Duplicate benchmark
-- No labelled duplicate-pair benchmark is included yet. Candidate scores are not reported as duplicate precision/recall; the unit tests cover explicit true-link and look-alike human-decision behavior only.
+- `duplicate_pairs.csv` contains 40 synthetic labelled pairs: 20 dev and 20 frozen test, with 40 unique incident groups and no group crossing. Labels are AI-authored/AI-reviewed, not independently human-labelled; all locations and examples are synthetic. Treat measured metrics as a software sanity check only.
+- `duplicate_test_manifest.json` freezes the test rows by hash. `duplicate_threshold.json` records the threshold chosen from dev only, the dev hash, and whether the preferred precision floor was met. Re-tune only on dev. A change to the test manifest requires an explicit data-change note and a newly governed evaluation, not silent threshold adjustment.
+- Candidate features use token overlap, exact normalized location, configured time window and hard conflict rules. Location proximity is not geospatial. Candidate scores are not probabilities or decisions.
+- Current test metrics after dev-only tuning are in `docs/TEST_REPORT.md`; the results are weak and must not be presented as validated duplicate detection.
+
+## Geographic scope options
+- `geo_coverage.json` contains selectable sample geographies for four states and selected cities/localities, including Gwalior's Morar and Gole Ka Mandir. These options are SIMULATED prototype coverage, not an authoritative ward register. Complaint area access depends on structured values and a persisted verified staff grant; a staff member's selection alone never grants access.
+
+## Pseudo staff directory
+- `staff_directory.csv` is a pseudo staff directory, simulated, not a real government directory. Its 24 fictional records use only `@staff.nagriksetu-demo.example` addresses and are tagged `SYNTHETIC`. The list supplies test roles/departments only; it proves no real person's identity, employment, or authority.
 
 ## Labelling judgement calls (assumptions, not facts)
 - Dead animal on a road -> Sanitation (road keyword would send it to Roads).

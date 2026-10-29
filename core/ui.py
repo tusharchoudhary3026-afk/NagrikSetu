@@ -1,5 +1,6 @@
 """Shared NagrikSetu branding, user bar, and responsive Streamlit styles."""
 import streamlit as st
+from html import escape
 
 from .auth import enforce_rbac
 
@@ -189,14 +190,15 @@ def render_userbar(user: dict | None = None):
     with left:
         st.markdown('<div class="nf-userbar nf-wordmark">🧭 NagrikSetu</div>', unsafe_allow_html=True)
     with right:
-        role = "Government" if user.get("role") == "government" else "Public"
+        role = escape((user.get("role") or "public").title())
+        display_name = escape(str(user.get("name", "User")))
         st.markdown(
-            f'<div class="nf-userbar">{user.get("name", "User")} '
+            f'<div class="nf-userbar">{display_name} '
             f'<span class="nf-role-pill">{role}</span></div>', unsafe_allow_html=True)
     with signout:
         if st.button("Sign out", key="nagriksetu_signout", width="stretch"):
-            st.session_state.pop("authenticated_user", None)
-            st.session_state.pop("google_pending_profile", None)
+            from .auth import logout_session
+            logout_session(st.session_state)
             try:
                 if getattr(st.user, "is_logged_in", False):
                     st.logout()
@@ -204,10 +206,15 @@ def render_userbar(user: dict | None = None):
                 pass
             st.rerun()
     st.divider()
+    from .auth import demo_mode
+    if demo_mode():
+        st.warning("DEMO MODE · Synthetic accounts and simulated verification codes. No email or SMS is sent.",
+                   icon="🧪")
     st.session_state["_nagriksetu_userbar_rendered"] = True
 
 
 def render_hero(eyebrow: str, title: str, description: str):
+    eyebrow, title, description = (escape(str(value)) for value in (eyebrow, title, description))
     st.markdown(
         f"""
         <section class="nf-hero">
@@ -222,7 +229,8 @@ def render_hero(eyebrow: str, title: str, description: str):
 
 def require_permission(action: str):
     """Stop a page when no signed-in account has the required permission."""
-    user = st.session_state.get("authenticated_user")
+    from .auth import authorize_user_action, refresh_session
+    user = refresh_session(st.session_state)
     if not user:
         apply_demo_style()
         render_hero("Staff access", "Sign in to continue",
@@ -231,7 +239,7 @@ def require_permission(action: str):
         st.page_link("pages/0_Home.py", label="Go to NagrikSetu sign in", icon="🔐")
         st.stop()
     try:
-        enforce_rbac(user.get("role"), action)
+        user = authorize_user_action(user["id"], action)
     except PermissionError:
         apply_demo_style()
         render_hero("Staff access", "This page isn't available to your account",

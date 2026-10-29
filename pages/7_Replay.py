@@ -10,14 +10,16 @@ from core.config import SIM_LABEL
 from core.privacy import mask_text
 from core.ui import apply_demo_style, render_hero
 from core.ui import require_permission
+from core.geo import is_geography_admin, scoped_complaints
 
 init_db()
-require_permission("can_audit")
+user = require_permission("can_audit")
 apply_demo_style()
 render_hero("Audit", "Case replay", "One case from first suggestion to latest decision, in order.")
 st.warning(SIM_LABEL)
 
-rows = fetch_all("SELECT id, case_id, parent_id, original_text,is_active FROM complaints ORDER BY id DESC")
+rows = [{key: row[key] for key in ("id", "case_id", "parent_id", "original_text", "is_active")}
+        for row in scoped_complaints(user, include_unassigned=is_geography_admin(user.get("email", "")))]
 if not rows:
     st.info("No complaints yet.")
     st.stop()
@@ -27,9 +29,9 @@ st.write("**Original text:**", mask_text(pick["original_text"]))
 
 st.subheader("Photo evidence")
 st.caption("Photo attachments are stored securely and are not analysed automatically.")
-for photo in get_attachments(pick["id"], st.session_state["authenticated_user"]["role"]):
+for photo in get_attachments(pick["id"], user["role"], actor_user=user):
     try:
-        st.image(read_attachment(photo["id"], st.session_state["authenticated_user"]["role"]),
+        st.image(read_attachment(photo["id"], user["role"], actor_user=user),
                  caption=f"photo attachment: stored only, not analysed · {photo['original_name']}")
     except ValueError as exc:
         st.warning(str(exc))
@@ -38,8 +40,8 @@ ICON = {"suggested": "🤖", "accept": "✅", "edit": "✏️", "clarify": "❓"
         "transfer": "↔️", "challenge": "⚖️", "challenge_resolved": "🔒", "split_confirmed": "✂️",
         "split_merged_back": "🔗", "duplicate_linked": "🔗", "duplicate_unlinked": "↩️",
         "correction_verified": "🏷️"}
-h = history(pick["id"])
-timeline = get_case_reassignment_timeline(pick["id"])
+h = history(pick["id"], actor_user=user)
+timeline = get_case_reassignment_timeline(pick["id"], actor_user=user)
 st.subheader("Timeline (append-only ledger)")
 if not timeline:
     st.caption("No ledger events for this case yet.")
@@ -72,5 +74,5 @@ if ch:
         st.write(f"#{c['id']} · {c['raised_by']} · {c['status']}: {mask_text(c['reason'])}")
 
 st.download_button("Download masked ledger audit report", generate_audit_export(
-    st.session_state["authenticated_user"]["role"]), file_name="nagriksetu-audit.json",
+    user["role"], actor_user=user), file_name="nagriksetu-audit.json",
     mime="application/json")

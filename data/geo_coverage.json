@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "status_label": "SIMULATED GEOGRAPHY OPTIONS · verify against authoritative municipal boundaries before production",
+  "states": [
+    {
+      "code": "mp", "name": "Madhya Pradesh", "cities": [
+        {"code": "mp-gwalior", "name": "Gwalior", "areas": [
+          {"code": "mp-gwalior-morar", "name": "Morar"},
+          {"code": "mp-gwalior-gole-ka-mandir", "name": "Gole Ka Mandir"},
+          {"code": "mp-gwalior-thatipur", "name": "Thatipur"},
+          {"code": "mp-gwalior-lashkar", "name": "Lashkar"},
+          {"code": "mp-gwalior-city-centre", "name": "City Centre"},
+          {"code": "mp-gwalior-hazira", "name": "Hazira"},
+          {"code": "mp-gwalior-kampoo", "name": "Kampoo"}
+        ]},
+        {"code": "mp-bhopal", "name": "Bhopal", "areas": [
+          {"code": "mp-bhopal-arera-colony", "name": "Arera Colony"},
+          {"code": "mp-bhopal-mp-nagar", "name": "MP Nagar"},
+          {"code": "mp-bhopal-kolar", "name": "Kolar"}
+        ]},
+        {"code": "mp-indore", "name": "Indore", "areas": [
+          {"code": "mp-indore-vijay-nagar", "name": "Vijay Nagar"},
+          {"code": "mp-indore-rajwada", "name": "Rajwada"}
+        ]}
+      ]
+    },
+    {
+      "code": "up", "name": "Uttar Pradesh", "cities": [
+        {"code": "up-lucknow", "name": "Lucknow", "areas": [
+          {"code": "up-lucknow-gomti-nagar", "name": "Gomti Nagar"},
+          {"code": "up-lucknow-hazratganj", "name": "Hazratganj"},
+          {"code": "up-lucknow-aliganj", "name": "Aliganj"}
+        ]},
+        {"code": "up-kanpur", "name": "Kanpur", "areas": [
+          {"code": "up-kanpur-civil-lines", "name": "Civil Lines"},
+          {"code": "up-kanpur-kakadeo", "name": "Kakadeo"}
+        ]}
+      ]
+    },
+    {
+      "code": "mh", "name": "Maharashtra", "cities": [
+        {"code": "mh-mumbai", "name": "Mumbai", "areas": [
+          {"code": "mh-mumbai-andheri-east", "name": "Andheri East"},
+          {"code": "mh-mumbai-bandra", "name": "Bandra"},
+          {"code": "mh-mumbai-dadar", "name": "Dadar"}
+        ]},
+        {"code": "mh-pune", "name": "Pune", "areas": [
+          {"code": "mh-pune-shivajinagar", "name": "Shivajinagar"},
+          {"code": "mh-pune-kothrud", "name": "Kothrud"},
+          {"code": "mh-pune-hadapsar", "name": "Hadapsar"}
+        ]}
+      ]
+    },
+    {
+      "code": "pb", "name": "Punjab", "cities": [
+        {"code": "pb-amritsar", "name": "Amritsar", "areas": [
+          {"code": "pb-amritsar-ranjit-avenue", "name": "Ranjit Avenue"},
+          {"code": "pb-amritsar-hall-bazar", "name": "Hall Bazar"},
+          {"code": "pb-amritsar-majitha-road", "name": "Majitha Road"}
+        ]},
+        {"code": "pb-ludhiana", "name": "Ludhiana", "areas": [
+          {"code": "pb-ludhiana-civil-lines", "name": "Civil Lines"},
+          {"code": "pb-ludhiana-model-town", "name": "Model Town"},
+          {"code": "pb-ludhiana-sarabha-nagar", "name": "Sarabha Nagar"}
+        ]}
+      ]
+    }
+  ]
+}

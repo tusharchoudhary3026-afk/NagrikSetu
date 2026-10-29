@@ -17,21 +17,23 @@ python -m streamlit run app.py
 
 ## Authentication and roles
 
-The app supports email/password accounts and optional Google sign-in through Streamlit's native OIDC. Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and replace the OAuth placeholders with a Google OAuth client. In Google Cloud Console, add `http://localhost:8501/oauth2callback` as an authorized redirect URI. Keep the real secrets file out of version control. Google sign-in stays hidden when the configuration is incomplete.
+Public users can register and sign in with email/password or an Indian mobile number/password. Phone registration requires a one-time verification step. Staff register only through `data/staff_directory.csv`; their directory role and department are assigned server-side and a staff email code is required. Government staff select their service area after sign-in and receive complaint access only after an authorized reviewer approves that area.
 
-Start the server with `python -m streamlit run app.py`, then create a Public user account from the registration tab. Government registration is granted only to an address listed in `data/gov_allowlist.csv` or when the user supplies the matching invite code. The secrets value `GOV_INVITE_CODE` must contain a scrypt hash, not the invite phrase; generate one with `python -m scripts.hash_government_invite`, then copy the output into the secrets file. The allowlist contains two fictional `.invalid` addresses for demonstration. Add approved addresses as a CSV row under the `email` column. Existing username-based accounts are preserved as legacy records and must re-register with an email to use the new interface.
+The checked-in staff directory and all verification codes are synthetic. The app starts in **DEMO MODE**, displays simulated codes on screen, and sends no real email or SMS. Staff directory identities do not establish real employment. Existing accounts and roles are retained; public signup cannot choose a staff role. The existing public role is named `public` in the database and corresponds to the citizen-facing interface.
 
-Passwords are salted hashes. Government and public pages are guarded server-side and the public complaint queries are scoped to the signed-in account. The UI shows a simulated-data banner and labels photos as stored only; the app does not analyze images.
+After staff sign-in, the Overview route opens the staff complaint operations dashboard; the public report form is not shown as the staff landing page. Operator inboxes are server-filtered by the account department and approved service areas. Reviewer and auditor visibility remains bounded by role and geography; auditors are read-only. The dashboard provides status/SLA cards, scoped search and filters, case routing and evidence, safety/ownership/duplicate signals, open review requests, an immutable timeline, and reasoned ledger actions. See `docs/STAFF_DASHBOARD.md` for role scope and demo assumptions.
 
-Known limits: no email verification, password reset, or MFA; SQLite complaint and decision data is not encrypted at rest by the application; roles and authentication are prototype-level and have not received a security audit. Configure HTTPS at a trusted hosting layer before exposing the app beyond local development.
+For local use, install the requirements and start `python -m streamlit run app.py`; schema migrations run on app startup. For the full authentication behavior and migration notes, see [docs/AUTH_NOTES.md](docs/AUTH_NOTES.md). Passwords are stored as bcrypt hashes (or scrypt if bcrypt is unavailable). Verification codes are stored as keyed hashes. Login attempts and authentication audit events persist in SQLite. These are prototype controls, not a production security certification.
+
+Real email/SMS delivery, MFA, password reset, SQLite encryption at rest, and production HTTPS/identity configuration are ROADMAP items. Disabling demo mode without setting `NAGRIKSETU_AUTH_SECRET` produces a clear configuration error; even with that secret, staff and phone verification cannot proceed until real providers are implemented.
 
 ## Test
 
 ```powershell
-python -m pytest tests -q
-python scripts/run_acceptance.py
-python scripts/evaluate.py
-python scripts/retrain_offline.py
+python -m pytest -q
+python -m scripts.run_acceptance
+python -m scripts.evaluate
+python -m scripts.retrain_offline
 ```
 
 The frozen test split is grouped by complaint family. Evaluation fits TF-IDF on train, tunes its abstention threshold on validation, and reports both systems on the held-out test rows. The dataset is small, synthetic, and AI-labelled; scores are preliminary and do not establish real-world performance or fairness.
@@ -57,3 +59,4 @@ The frozen test split is grouped by complaint family. Evaluation fits TF-IDF on 
 Speech-to-text remains a trial feature; actual microphone and language-quality validation is still required. Existing photo files created before the encryption migration are marked legacy plaintext and cannot be viewed through the app; re-upload them using the secure intake flow. The SQLite complaint/decision database has no application-level encryption, and HTTPS, backups, retention, and production-grade identity infrastructure must be verified and configured for the deployment. No labelled duplicate-pair benchmark is included, so duplicate precision/recall are not reported. Do not put real or sensitive case data into this prototype.
 
 See [data/DATASET_CARD.md](data/DATASET_CARD.md) for dataset provenance and limitations.
+See [docs/AUTH_NOTES.md](docs/AUTH_NOTES.md) for the authentication implementation, simulated pieces, and roadmap.

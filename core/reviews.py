@@ -4,12 +4,15 @@ import json
 from .auth import enforce_rbac
 from .config import REASON_CODES, REVIEW_ACTIONS
 from .db import get_conn
+from .suggestions import selected_department
+from .geo import authorize_staff_complaint
 
 
 def submit_review(complaint_id: int, actor_role: str, action: str, final_dept: str | None = None,
                   reason: str | None = None, reason_code: str | None = None,
-                  actor_email: str | None = None) -> None:
+                  actor_email: str | None = None, actor_user: dict | None = None) -> None:
     enforce_rbac(actor_role, "can_review")
+    authorize_staff_complaint(actor_role, complaint_id, actor_user)
     if action not in REVIEW_ACTIONS:
         raise ValueError("Choose a supported human review action.")
     if action in {"edit", "escalate", "transfer"}:
@@ -25,10 +28,10 @@ def submit_review(complaint_id: int, actor_role: str, action: str, final_dept: s
         complaint = conn.execute("SELECT original_text FROM complaints WHERE id=?", (complaint_id,)).fetchone()
         if not complaint:
             raise ValueError("Complaint not found.")
-        suggestion = conn.execute("SELECT top3 FROM suggestions WHERE complaint_id=? ORDER BY id DESC LIMIT 1",
+        suggestion = conn.execute("SELECT top3,abstained FROM suggestions WHERE complaint_id=? ORDER BY id DESC LIMIT 1",
                                   (complaint_id,)).fetchone()
         top3 = json.loads(suggestion["top3"]) if suggestion else []
-        suggested = top3[0]["dept"] if top3 else None
+        suggested = selected_department({"top3": top3, "abstained": bool(suggestion["abstained"])}) if suggestion else None
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("INSERT INTO ledger (complaint_id,event_type,actor,suggested_dept,final_dept,reason,reason_code,details) "
                      "VALUES (?,?,?,?,?,?,?,?)",

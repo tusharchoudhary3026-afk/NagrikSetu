@@ -1,0 +1,25 @@
+staff_email,full_name,role,department,status,registered,tag
+operator01@staff.nagriksetu-demo.example,Aarav Demo,operator,Roads Dept,active,0,SYNTHETIC
+operator02@staff.nagriksetu-demo.example,Anaya Sample,operator,Drainage Dept,active,0,SYNTHETIC
+operator03@staff.nagriksetu-demo.example,Vivaan Example,operator,Sanitation Dept,active,0,SYNTHETIC
+operator04@staff.nagriksetu-demo.example,Diya Fiction,operator,Electricity Dept,active,0,SYNTHETIC
+operator05@staff.nagriksetu-demo.example,Reyansh Demo,operator,Water Supply Dept,active,0,SYNTHETIC
+operator06@staff.nagriksetu-demo.example,Ira Sample,operator,Grievance Cell,active,0,SYNTHETIC
+operator07@staff.nagriksetu-demo.example,Kabir Example,operator,Roads Dept,active,0,SYNTHETIC
+operator08@staff.nagriksetu-demo.example,Myra Fiction,operator,Drainage Dept,active,0,SYNTHETIC
+reviewer01@staff.nagriksetu-demo.example,Arjun Demo,reviewer,Drainage Dept,active,0,SYNTHETIC
+reviewer02@staff.nagriksetu-demo.example,Saanvi Sample,reviewer,Sanitation Dept,active,0,SYNTHETIC
+reviewer03@staff.nagriksetu-demo.example,Atharv Example,reviewer,Electricity Dept,active,0,SYNTHETIC
+reviewer04@staff.nagriksetu-demo.example,Anvi Fiction,reviewer,Water Supply Dept,active,0,SYNTHETIC
+reviewer05@staff.nagriksetu-demo.example,Advik Demo,reviewer,Grievance Cell,active,0,SYNTHETIC
+reviewer06@staff.nagriksetu-demo.example,Pari Sample,reviewer,Roads Dept,active,0,SYNTHETIC
+reviewer07@staff.nagriksetu-demo.example,Ishaan Example,reviewer,Drainage Dept,active,0,SYNTHETIC
+reviewer08@staff.nagriksetu-demo.example,Navya Fiction,reviewer,Sanitation Dept,active,0,SYNTHETIC
+auditor01@staff.nagriksetu-demo.example,Vihaan Demo,auditor,Grievance Cell,active,0,SYNTHETIC
+auditor02@staff.nagriksetu-demo.example,Aadhya Sample,auditor,Water Supply Dept,active,0,SYNTHETIC
+auditor03@staff.nagriksetu-demo.example,Krish Example,auditor,Electricity Dept,active,0,SYNTHETIC
+auditor04@staff.nagriksetu-demo.example,Kiara Fiction,auditor,Roads Dept,active,0,SYNTHETIC
+auditor05@staff.nagriksetu-demo.example,Dhruv Demo,auditor,Grievance Cell,disabled,0,SYNTHETIC
+disabled01@staff.nagriksetu-demo.example,Tara Sample,operator,Grievance Cell,disabled,0,SYNTHETIC
+registered01@staff.nagriksetu-demo.example,Neel Example,reviewer,Sanitation Dept,active,1,SYNTHETIC
+operator09@staff.nagriksetu-demo.example,Meera Fiction,operator,Water Supply Dept,active,0,SYNTHETIC

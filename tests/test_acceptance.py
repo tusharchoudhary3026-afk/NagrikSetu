@@ -34,27 +34,31 @@ def test_AT02_vague_asks_and_invents_nothing():
     assert intake.clarification_question(rec)
 
 
-def test_AT03_similar_candidates_need_a_human_decision(db):
+def test_AT03_similar_candidates_need_a_human_decision(db, staff_user):
+    reviewer = staff_user("reviewer")
     first = _save("Garbage dump near Ward 4 market.", "CASE-AT03-A")
     second = _save("Garbage dump near Ward 9 market.", "CASE-AT03-B")
     match = next(row for row in find_candidates(first) if row["complaint_id"] == second)
     assert match["shared_terms"] and match["decision"] == "needs_review"
     assert fetch_all("SELECT * FROM incident_links") == []
-    record_decision(first, second, "different", "reviewer", "Different ward and incident")
+    record_decision(first, second, "different", "reviewer", "Different ward and incident",
+                    reason_code="different_incident", actor_user=reviewer)
     assert fetch_all("SELECT * FROM incident_links") == []
     assert fetch_all("SELECT decision FROM duplicate_reviews")[0]["decision"] == "different"
+    assert fetch_all("SELECT reason_code FROM duplicate_reviews")[0]["reason_code"] == "different_incident"
 
 
-def test_AT04_override_stores_correction(db):
+def test_AT04_override_stores_correction(db, staff_user):
+    reviewer = staff_user("reviewer")
     cid = _save("The streetlight is not working near City Centre.", "CASE-T4")
     with pytest.raises(ValueError):
-        submit_review(cid, "reviewer", "edit", "Roads Dept", "", "wrong_category")
+        submit_review(cid, "reviewer", "edit", "Roads Dept", "", "wrong_category", actor_user=reviewer)
     with pytest.raises(ValueError):
-        submit_review(cid, "reviewer", "edit", "Roads Dept", "A reason", None)
-    first = history(cid)[0]
+        submit_review(cid, "reviewer", "edit", "Roads Dept", "A reason", None, actor_user=reviewer)
+    first = history(cid, actor_user=reviewer)[0]
     submit_review(cid, "reviewer", "edit", "Roads Dept",
-                  "Pole is on a road-widening site", "wrong_category")
-    h = history(cid)
+                  "Pole is on a road-widening site", "wrong_category", actor_user=reviewer)
+    h = history(cid, actor_user=reviewer)
     assert [e["event_type"] for e in h] == ["suggested", "edit"]
     assert h[0] == first and h[1]["reason"] and h[1]["suggested_dept"] == "Electricity Dept"
     assert len(fetch_all("SELECT * FROM corrections WHERE complaint_id=?", (cid,))) == 1
@@ -78,20 +82,21 @@ def test_AT06_language_results_reported():
     assert set(out) == {"english", "hindi", "hinglish"} and all(n > 0 for _, n in out.values())
 
 
-def test_AT07_compound_split_and_merge_back(db):
+def test_AT07_compound_split_and_merge_back(db, staff_user):
+    reviewer = staff_user("reviewer")
     text = "Streetlight is not working in Thatipur and garbage is also piled up near the park."
     sp = splitter.propose_split(text)
     assert sp["is_compound"] and len(sp["parts"]) == 2
     one = splitter.propose_split("The drain is blocked and the sewer is overflowing near Morar.")
     assert not one["is_compound"]                      # looks compound, one owner: kept intact
     cid = _save(text, "CASE-T7")
-    ids = splitter.confirm_split(cid, "CASE-T7", sp["parts"], "reviewer")
+    ids = splitter.confirm_split(cid, "CASE-T7", sp["parts"], "reviewer", actor_user=reviewer)
     assert len(ids) == 2
     with pytest.raises(ValueError):
-        splitter.confirm_split(cid, "CASE-T7", sp["parts"], "reviewer")
-    assert splitter.merge_back(cid, "reviewer") == 2
+        splitter.confirm_split(cid, "CASE-T7", sp["parts"], "reviewer", actor_user=reviewer)
+    assert splitter.merge_back(cid, "reviewer", actor_user=reviewer) == 2
     with pytest.raises(ValueError):
-        splitter.merge_back(cid, "reviewer")
+        splitter.merge_back(cid, "reviewer", actor_user=reviewer)
     assert len(fetch_all("SELECT id FROM complaints WHERE parent_id=?", (cid,))) == 2  # never deleted
 
 

@@ -16,8 +16,38 @@ CREATE TABLE IF NOT EXISTS complaints (
     is_synthetic    INTEGER NOT NULL DEFAULT 1,
     is_active       INTEGER NOT NULL DEFAULT 1,
     submitted_by    INTEGER REFERENCES users(id),
+    state_code      TEXT,
+    state_name      TEXT,
+    city_code       TEXT,
+    city_name       TEXT,
+    area_code       TEXT,
+    area_name       TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Geographic access requests and grants are events; never rewrite their history.
+CREATE TABLE IF NOT EXISTS government_area_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    state_code  TEXT NOT NULL,
+    city_code   TEXT NOT NULL,
+    area_code   TEXT NOT NULL,
+    event_type  TEXT NOT NULL CHECK(event_type IN ('requested','approved','rejected','revoked')),
+    actor_email TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_geo_events_user_area_id
+ON government_area_events(user_id,state_code,city_code,area_code,id);
+
+CREATE TRIGGER IF NOT EXISTS government_area_events_no_update
+BEFORE UPDATE ON government_area_events
+BEGIN SELECT RAISE(ABORT, 'geographic access history is append-only'); END;
+
+CREATE TRIGGER IF NOT EXISTS government_area_events_no_delete
+BEFORE DELETE ON government_area_events
+BEGIN SELECT RAISE(ABORT, 'geographic access history is append-only'); END;
 
 CREATE TABLE IF NOT EXISTS suggestions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +118,7 @@ CREATE TABLE IF NOT EXISTS duplicate_reviews (
     decision              TEXT NOT NULL,
     actor                 TEXT NOT NULL,
     reason                TEXT NOT NULL,
+    reason_code           TEXT NOT NULL DEFAULT 'legacy_reason',
     created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -126,8 +157,64 @@ CREATE TABLE IF NOT EXISTS users (
     failed_attempts INTEGER NOT NULL DEFAULT 0,
     locked_until    TEXT,
     active          INTEGER NOT NULL DEFAULT 1,
+    phone           TEXT UNIQUE,
+    phone_verified  INTEGER NOT NULL DEFAULT 0,
+    department      TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS staff_directory (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_email   TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    full_name     TEXT NOT NULL,
+    role          TEXT NOT NULL CHECK(role IN ('operator','reviewer','auditor')),
+    department    TEXT NOT NULL CHECK(department IN ('Roads Dept','Drainage Dept','Sanitation Dept',
+                     'Electricity Dept','Water Supply Dept','Grievance Cell')),
+    status        TEXT NOT NULL CHECK(status IN ('active','disabled')),
+    registered    INTEGER NOT NULL DEFAULT 0 CHECK(registered IN (0,1)),
+    tag           TEXT NOT NULL CHECK(tag='SYNTHETIC')
+);
+
+CREATE TABLE IF NOT EXISTS verification_challenges (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    purpose         TEXT NOT NULL CHECK(purpose IN ('staff_email','public_phone')),
+    identifier_hash TEXT NOT NULL,
+    code_salt       TEXT NOT NULL,
+    code_hash       TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    consumed_at     TEXT,
+    last_sent_at    TEXT NOT NULL,
+    request_count   INTEGER NOT NULL DEFAULT 1,
+    window_started_at TEXT NOT NULL,
+    account_name    TEXT,
+    password_hash   TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS verification_challenges_lookup
+ON verification_challenges(purpose,identifier_hash,id DESC);
+
+CREATE TABLE IF NOT EXISTS auth_login_attempts (
+    identifier_hash TEXT PRIMARY KEY,
+    window_started_at TEXT NOT NULL,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS auth_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type      TEXT NOT NULL,
+    identifier_hash TEXT NOT NULL,
+    outcome         TEXT NOT NULL,
+    role            TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TRIGGER IF NOT EXISTS auth_events_no_update
+BEFORE UPDATE ON auth_events
+BEGIN SELECT RAISE(ABORT, 'auth event history is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS auth_events_no_delete
+BEFORE DELETE ON auth_events
+BEGIN SELECT RAISE(ABORT, 'auth event history is append-only'); END;
 
 -- Old username-based records are retained intact here during the account migration.
 CREATE TABLE IF NOT EXISTS legacy_users (

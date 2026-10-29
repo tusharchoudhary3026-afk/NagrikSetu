@@ -1,0 +1,48 @@
+{
+  "run_at": "2026-10-29T02:00:35",
+  "label": "SIMULATED / SYNTHETIC acceptance scenarios",
+  "results": [
+    {
+      "id": "AT-01",
+      "scenario": "Clear complaint, known owner",
+      "pass_condition": "Correct top suggestion against current labelled owner",
+      "status": "PASS",
+      "details": "Routed to: Roads Dept"
+    },
+    {
+      "id": "AT-02",
+      "scenario": "Vague text / missing location",
+      "pass_condition": "Ask a targeted question and abstain without inventing facts",
+      "status": "PASS",
+      "details": "Question: Which ward, street or nearby landmark is this about?; route abstained: True"
+    },
+    {
+      "id": "AT-03",
+      "scenario": "Similar wording, distinct incidents",
+      "pass_condition": "No automatic split or duplicate merge",
+      "status": "PASS",
+      "details": "Each complaint remains an independent case."
+    },
+    {
+      "id": "AT-04",
+      "scenario": "Reviewer overrides suggestion",
+      "pass_condition": "Store correction, reason, and prior suggestion",
+      "status": "PASS",
+      "details": "Override and correction saved in isolated database."
+    },
+    {
+      "id": "AT-05",
+      "scenario": "Predefined safety case",
+      "pass_condition": "Flag for human review under team-proposed rubric",
+      "status": "PASS",
+      "details": "[{'rule_id': 'live_wire', 'label': 'Possible live or exposed electrical wire', 'matched_text': ['exposed wire', 'wire is sparking'], 'status': 'HUMAN_REVIEW_REQUIRED'}]"
+    },
+    {
+      "id": "AT-06",
+      "scenario": "Equivalent English/Hindi/Hinglish case",
+      "pass_condition": "Report each language with non-zero dataset sample sizes",
+      "status": "PASS",
+      "details": "detected={'english': 'english', 'hindi': 'hindi', 'hinglish': 'hinglish'}; sample_sizes={'english': 32, 'hindi': 32, 'hinglish': 32}"
+    }
+  ]
+}

@@ -1,11 +1,13 @@
 """Small acceptance scenarios using actual service behavior and isolated test storage."""
 import tempfile
+import os
 from pathlib import Path
 
 import pandas as pd
 
 from . import db as dbm
-from .auth import verify_permission
+from .auth import (begin_staff_registration, register_user,
+                  verify_permission, verify_staff_registration)
 from .challenges import create_challenge, resolve_challenge
 from .config import COMPLAINTS
 from .db import init_db, insert_complaint, insert_suggestion
@@ -48,19 +50,29 @@ def run_at_03_similar_wording():
 
 def run_at_04_reviewer_override():
     old_path = dbm.DB_PATH
+    old_geo_admins = os.environ.get("NYAYAFLOW_GEO_ADMIN_EMAILS")
     try:
         with tempfile.TemporaryDirectory() as temp:
             dbm.DB_PATH = Path(temp) / "acceptance.db"
             init_db()
+            citizen = register_user("citizen@acceptance.example", "Resident", "Safe!River72",
+                                    password_confirm="Safe!River72")
+            reviewer_email = "reviewer01@staff.nagriksetu-demo.example"
+            staff_flow = begin_staff_registration(
+                reviewer_email, "Ignored form name", "Verify!Example42",
+                "Verify!Example42", code="314159")
+            reviewer = verify_staff_registration(reviewer_email, staff_flow["simulated_code"])
+            os.environ["NYAYAFLOW_GEO_ADMIN_EMAILS"] = reviewer_email
             rec = {"case_id": "AT04", "parent_id": None, "original_text": "Broken streetlight",
                    "language": "english", "normalized_text": "broken streetlight", "channel": "portal",
                    "location": "unknown", "issue": "streetlight", "requested_action": None,
                    "missing_fields": "location", "is_synthetic": 1}
-            cid = insert_complaint(rec)
+            cid = insert_complaint(rec, submitted_by=citizen["id"])
             insert_suggestion(cid, "baseline", [{"dept": "Roads Dept", "score": 1}], {}, 1, 0)
-            challenge = create_challenge(cid, "citizen", "Wrong department")
-            resolve_challenge(challenge, "reviewer", "Electrical team owns streetlights", "edit",
-                              final_dept="Electricity Dept", reason_code="wrong_category")
+            challenge = create_challenge(cid, "citizen", "Wrong department", citizen_user_id=citizen["id"])
+            resolve_challenge(challenge, reviewer["role"], "Electrical team owns streetlights", "edit",
+                              final_dept="Electricity Dept", reason_code="wrong_category",
+                              actor_email=reviewer["email"], actor_user=reviewer)
             events = dbm.fetch_all("SELECT event_type,suggested_dept,final_dept FROM ledger WHERE complaint_id=? ORDER BY id", (cid,))
             corrections = dbm.fetch_all("SELECT * FROM corrections WHERE complaint_id=?", (cid,))
             passed = len(events) == 3 and events[-1]["suggested_dept"] == "Roads Dept" and bool(corrections)
@@ -69,6 +81,10 @@ def run_at_04_reviewer_override():
         detail = str(exc)
     finally:
         dbm.DB_PATH = old_path
+        if old_geo_admins is None:
+            os.environ.pop("NYAYAFLOW_GEO_ADMIN_EMAILS", None)
+        else:
+            os.environ["NYAYAFLOW_GEO_ADMIN_EMAILS"] = old_geo_admins
     return {"id": "AT-04", "scenario": "Reviewer overrides suggestion",
             "pass_condition": "Store correction, reason, and prior suggestion",
             "status": "PASS" if passed else "FAIL",

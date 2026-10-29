@@ -5,34 +5,45 @@ from core.attachment import get_attachments, read_attachment
 from core.config import REASON_CODES, REVIEW_ACTIONS, SIM_LABEL
 from core.corrections import review_correction
 from core.db import fetch_all, init_db
-from core.duplicates import find_candidates, record_decision
+from core.duplicates import DECISION_REASON_CODES, find_candidates, record_decision
 from core.explanation import generate_grounded_explanation
 from core.ledger import history
 from core.ownership import check_suggestions, detect_bounce, repeat_reassignment
 from core.privacy import mask_text
 from core.reviews import submit_review
 from core.splitter import merge_back
+from core.suggestions import selected_department
 from core.ui import require_permission
+from core.geo import is_geography_admin, scoped_complaints
 
 init_db()
 user = require_permission("can_review")
 st.title("Human review")
 st.warning(SIM_LABEL)
+st.caption("Review access is limited to your verified geographic areas and current role permissions. "
+           "Routing suggestions remain recommendations until a person records a decision.")
 
-rows = fetch_all("SELECT id,case_id,parent_id,language,original_text FROM complaints ORDER BY id DESC")
+rows = [{key: row[key] for key in ("id", "case_id", "parent_id", "language", "original_text", "location",
+                                    "state_name", "city_name", "area_name", "issue", "requested_action", "missing_fields")}
+        for row in scoped_complaints(user, include_unassigned=is_geography_admin(user.get("email", "")))]
 if not rows:
     st.info("No complaints yet. Use Intake first.")
     st.stop()
 pick = st.selectbox("Complaint", rows,
                     format_func=lambda r: f"{r['case_id']} | {r['language']} | {mask_text(r['original_text'])[:50]}")
 st.write("**Original complaint (personal details masked):**", mask_text(pick["original_text"]))
+area_label = " · ".join(value for value in (pick.get("state_name"), pick.get("city_name"), pick.get("area_name")) if value)
+st.caption(f"Service area: {area_label or 'Unassigned · restricted manual-review queue'} · "
+           f"Extracted issue: {pick.get('issue') or 'unknown'} · "
+           f"Requested action: {pick.get('requested_action') or 'unspecified'} · "
+           f"Missing fields: {pick.get('missing_fields') or 'none recorded'}")
 
 sugs = fetch_all("SELECT * FROM suggestions WHERE complaint_id=? ORDER BY id DESC LIMIT 1", (pick["id"],))
 suggested = None
 top3 = []
 if sugs:
     top3 = json.loads(sugs[0]["top3"])
-    suggested = top3[0]["dept"] if top3 else None
+    suggested = selected_department({"top3": top3, "abstained": bool(sugs[0]["abstained"])})
     evidence = json.loads(sugs[0]["evidence"] or "{}")
     st.write("**Department suggestions:**", top3)
     st.caption(f"Confidence score: {sugs[0]['confidence']} (uncalibrated) · Manual review: {bool(sugs[0]['abstained'])}")
@@ -57,7 +68,7 @@ if children:
                  hide_index=True, width="stretch")
     if st.button("Merge split back into the intact complaint"):
         try:
-            count = merge_back(pick["id"], user["role"], actor_email=user.get("email"))
+            count = merge_back(pick["id"], user["role"], actor_email=user.get("email"), actor_user=user)
             st.success(f"Merged {count} child views back. All child records and history were retained.")
             st.rerun()
         except (ValueError, PermissionError) as exc:
@@ -71,16 +82,16 @@ code = st.selectbox("Reason code", REASON_CODES)
 if st.button("Record decision", type="primary"):
     try:
         submit_review(pick["id"], user["role"], action, final, reason, code,
-                      actor_email=user.get("email"))
+                      actor_email=user.get("email"), actor_user=user)
         st.success("Decision and any correction example were saved together. Earlier history remains intact.")
     except (ValueError, PermissionError) as exc:
         st.error(str(exc))
 
 st.subheader("Photo attachments")
-attachments = get_attachments(pick["id"], user["role"])
+attachments = get_attachments(pick["id"], user["role"], actor_user=user)
 for attachment in attachments:
     try:
-        st.image(read_attachment(attachment["id"], user["role"]),
+        st.image(read_attachment(attachment["id"], user["role"], actor_user=user),
                  caption=f"photo attachment: stored only, not analysed · {attachment['original_name']}")
     except ValueError as exc:
         st.warning(str(exc))
@@ -89,25 +100,30 @@ if not attachments:
 
 st.subheader("Possible duplicate or related incidents")
 st.caption("Scores rank candidates; they are not probabilities or duplicate decisions. Similarity never changes status or routing.")
-candidates = find_candidates(pick["id"])
+candidates = find_candidates(pick["id"], actor_user=user)
 if candidates:
     candidate = st.selectbox("Candidate", candidates,
-        format_func=lambda c: f"{c['case_id']} · score {c['score']:.2f} · {c['decision']}")
+        format_func=lambda c: f"{c['case_id']} · {c['candidate_outcome']} · score {c['score']:.2f} · {c['decision']}")
+    st.caption(f"Candidate outcome: {candidate['candidate_outcome']} · review signal only; does not change case status or routing.")
     left, right = st.columns(2)
     left.markdown("**Selected complaint**")
     left.write(mask_text(pick["original_text"]))
     right.markdown(f"**Candidate {candidate['case_id']}**")
     right.write(mask_text(candidate["original_text"]))
-    st.write({"shared_terms": candidate["shared_terms"], "location_match": candidate["location_match"],
-              "time_difference_days": candidate["time_difference_days"], "missing_or_conflicting": candidate["conflicts"]})
+    st.write({"shared_terms": candidate["shared_terms"], "text_score": candidate["text_score"],
+              "location_match": candidate["location_match"], "time_match": candidate["time_match"],
+              "time_difference_days": candidate["time_difference_days"],
+              "missing_fields": candidate["missing_fields"], "conflicts": candidate["conflicts"]})
     decision = st.selectbox("Human decision", ["same_incident", "related", "different", "needs_info", "unlink"],
                             format_func=lambda x: {"same_incident": "Confirm same incident", "related": "Related, not duplicate",
                                 "different": "Different incident", "needs_info": "Need more information", "unlink": "Unlink / reopen"}[x])
+    duplicate_reason_code = DECISION_REASON_CODES[decision]
+    st.caption(f"Structured reason code: `{duplicate_reason_code}`")
     duplicate_reason = st.text_input("Decision reason")
     if st.button("Save duplicate review"):
         try:
             record_decision(pick["id"], candidate["complaint_id"], decision, user["role"], duplicate_reason,
-                            actor_email=user.get("email"))
+                            actor_email=user.get("email"), reason_code=duplicate_reason_code, actor_user=user)
             st.success("Duplicate review recorded. Original complaints and decisions remain available.")
             st.rerun()
         except (ValueError, PermissionError) as exc:
@@ -116,7 +132,7 @@ else:
     st.info("No possible candidates found. Missing location or time may limit matching.")
 
 st.subheader("Ledger (append-only)")
-h = history(pick["id"])
+h = history(pick["id"], actor_user=user)
 st.dataframe([{**event, "reason": mask_text(event.get("reason", ""))} for event in h],
              width="stretch", hide_index=True)
 bounce, repeats = detect_bounce(h), repeat_reassignment(h)
@@ -142,7 +158,7 @@ for correction in pending:
             if column.button(label, key=f"{status}-{correction['id']}"):
                 try:
                     review_correction(correction["id"], user.get("email", "government"), user["role"], status,
-                                      verification_reason, actor_email=user.get("email"))
+                                      verification_reason, actor_email=user.get("email"), actor_user=user)
                     st.success("Verification outcome appended to the audit history.")
                     st.rerun()
                 except (ValueError, PermissionError) as exc:

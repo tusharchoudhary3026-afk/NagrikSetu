@@ -10,6 +10,9 @@ from .auth import enforce_rbac
 from .config import ROOT
 from .db import execute, fetch_all, get_conn
 from .security import attachment_encryption_key
+from .geo import authorize_staff_complaint
+from .geo import STAFF_ROLES
+from .auth import authorize_user_action
 
 _ENCRYPTED_HEADER = b"NF01"
 
@@ -86,7 +89,7 @@ def validate_attachments(uploaded_files) -> int:
     return len(files)
 
 
-def save_attachments(complaint_id: int, uploaded_files, actor_role: str) -> list[str]:
+def save_attachments(complaint_id: int, uploaded_files, actor_role: str, actor_user: dict | None = None) -> list[str]:
     """Validate and store up to three private, metadata-stripped photo files atomically."""
     enforce_rbac(actor_role, "can_intake")
     files = [uploaded for uploaded in (uploaded_files or []) if uploaded is not None]
@@ -100,8 +103,19 @@ def save_attachments(complaint_id: int, uploaded_files, actor_role: str) -> list
     conn = get_conn()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        if not conn.execute("SELECT 1 FROM complaints WHERE id=?", (complaint_id,)).fetchone():
+        complaint = conn.execute("SELECT submitted_by FROM complaints WHERE id=?", (complaint_id,)).fetchone()
+        if not complaint:
             raise ValueError("Complaint not found.")
+        if actor_role in STAFF_ROLES:
+            if not actor_user or actor_user.get("role") != actor_role:
+                raise PermissionError("Pass the authenticated staff account to attach a photo.")
+            authorize_user_action(actor_user.get("id"), "can_intake")
+            authorize_staff_complaint(actor_role, complaint_id, actor_user)
+        elif actor_role == "public":
+            account = conn.execute("SELECT id,role,active FROM users WHERE id=?", ((actor_user or {}).get("id"),)).fetchone()
+            if (not account or not account["active"] or account["role"] != "public"
+                    or complaint["submitted_by"] != account["id"]):
+                raise PermissionError("Residents can attach photos only to their own complaints.")
         existing = conn.execute("SELECT COUNT(*) AS n FROM attachments WHERE complaint_id=?", (complaint_id,)).fetchone()["n"]
         if existing + len(prepared) > MAX_ATTACHMENTS_PER_COMPLAINT:
             raise ValueError(f"A complaint can have no more than {MAX_ATTACHMENTS_PER_COMPLAINT} photos.")
@@ -129,22 +143,27 @@ def save_attachments(complaint_id: int, uploaded_files, actor_role: str) -> list
         conn.close()
 
 
-def save_attachment(complaint_id: int, uploaded_file, actor_role: str) -> str | None:
+def save_attachment(complaint_id: int, uploaded_file, actor_role: str, actor_user: dict | None = None) -> str | None:
     if not uploaded_file:
         return None
-    saved = save_attachments(complaint_id, [uploaded_file], actor_role)
+    saved = save_attachments(complaint_id, [uploaded_file], actor_role, actor_user=actor_user)
     return saved[0] if saved else None
 
 
-def get_attachments(complaint_id: int, actor_role: str):
+def get_attachments(complaint_id: int, actor_role: str, actor_user: dict | None = None):
     enforce_rbac(actor_role, "can_view_attachments")
+    if actor_role in STAFF_ROLES:
+        if not actor_user or actor_user.get("role") != actor_role:
+            raise PermissionError("Pass the authenticated staff account to view photos.")
+        authorize_user_action(actor_user.get("id"), "can_view_attachments")
+    authorize_staff_complaint(actor_role, complaint_id, actor_user)
     return fetch_all("SELECT id, complaint_id, filename, file_path, content_type, byte_size, is_encrypted, "
                      "COALESCE(original_name,filename) AS original_name,COALESCE(mime,content_type) AS mime, "
                      "COALESCE(size_bytes,byte_size) AS size_bytes,created_at "
                      "FROM attachments WHERE complaint_id=? ORDER BY id", (complaint_id,))
 
 
-def read_attachment(attachment_id: int, actor_role: str) -> bytes:
+def read_attachment(attachment_id: int, actor_role: str, actor_user: dict | None = None) -> bytes:
     """Return decrypted photo bytes to an authorized reviewer; legacy plaintext is denied."""
     enforce_rbac(actor_role, "can_view_attachments")
     rows = fetch_all("SELECT complaint_id, filename, file_path, is_encrypted FROM attachments WHERE id=?",
@@ -152,6 +171,11 @@ def read_attachment(attachment_id: int, actor_role: str) -> bytes:
     if not rows:
         raise ValueError("Photo attachment not found.")
     row = rows[0]
+    if actor_role in STAFF_ROLES:
+        if not actor_user or actor_user.get("role") != actor_role:
+            raise PermissionError("Pass the authenticated staff account to read photos.")
+        authorize_user_action(actor_user.get("id"), "can_view_attachments")
+    authorize_staff_complaint(actor_role, row["complaint_id"], actor_user)
     if not row["is_encrypted"]:
         raise ValueError("This legacy photo is not encrypted. Re-upload it through the secure intake flow.")
     try:

@@ -37,18 +37,20 @@ def evaluate_component_3_and_5(split="test"):
     # Fit only on train; tune abstention only on validation; test is used once for reporting.
     ml = router_ml.fit_default(tr)
     th, curve = router_ml.choose_threshold(ml, va)
-    th_used = th if th is not None else 0.40
+    threshold_met = any(row["coverage"] >= 0.25 and row["answered"] for row in curve)
 
     results = {
         "split": split,
         "n_test_rows": len(te),
-        "threshold_used": th_used
+        "threshold_used": th,
+        "threshold_met_target": threshold_met,
+        "threshold_source": "validation" if threshold_met else None,
     }
 
     # Baseline evaluation (Component 3)
     base_results = _evaluate_router("baseline", te, lambda t: router_baseline.route(t, kw))
     # TF-IDF evaluation (Component 3)
-    tfidf_results = _evaluate_router("tfidf", te, lambda t: ml.route(t, th_used))
+    tfidf_results = _evaluate_router("tfidf", te, lambda t: ml.route(t, th))
 
     results["baseline"] = base_results
     results["tfidf"] = tfidf_results

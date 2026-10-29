@@ -4,6 +4,27 @@ from core.auth import require_login
 from core.db import fetch_all, init_db
 from core.portal import list_own_complaints
 from core.ui import apply_demo_style, render_hero
+from core.geo import (configure_staff_location, is_geography_admin,
+                      staff_location_snapshot)
+from core.geo_ui import render_geography_picker
+from core.geo import STAFF_ROLES
+from core.staff_dashboard_ui import render_staff_dashboard
+
+
+def _render_area_request(user, prefix):
+    selected = render_geography_picker(prefix)
+    request_reason = st.text_input("Reason for this assignment request", key=f"{prefix}-reason")
+    if st.button("Submit area access request", key=f"{prefix}-submit"):
+        try:
+            outcome = configure_staff_location(user, *selected, reason=request_reason)
+            if outcome["status"] == "approved":
+                st.success("This area is already verified in the protected allowlist.")
+            else:
+                st.success("Request recorded for an authorized administrator to review.")
+            st.rerun()
+        except (ValueError, PermissionError) as exc:
+            st.error(str(exc))
+
 
 init_db()
 user = require_login()
@@ -61,20 +82,58 @@ if user["role"] == "public":
             )
             st.caption("NagrikSetu is a prototype using synthetic demo data. Department rules are assumptions, not an official charter.")
 else:
+    if user["role"] in STAFF_ROLES:
+        location_state = staff_location_snapshot(user)
+        if is_geography_admin(user.get("email", "")):
+            st.page_link("pages/12_Area_Access_Admin.py", label="Review staff area-access requests", icon="📍")
+        st.subheader("Your verified service areas")
+        if location_state["assigned"]:
+            st.dataframe([{"State": row["state_name"], "City": row["city_name"], "Area": row["area_name"],
+                           "Verified by": row["actor_email"], "Reason": row["reason"]}
+                          for row in location_state["assigned"]], hide_index=True, width="stretch")
+            with st.expander("Request access to another service area"):
+                _render_area_request(user, "staff-area-request")
+        else:
+            st.warning("No service area is verified for this account. Complaint records remain hidden until an administrator approves an assignment.")
+            st.subheader("Request your service area")
+            st.caption("Select your assigned location. An authorized administrator must verify it before any complaint records are shown.")
+            _render_area_request(user, "staff-first-area-request")
+        if location_state["pending"]:
+            st.info(f"Area request pending verification: {location_state['pending']['state_code']} / "
+                    f"{location_state['pending']['city_code']} / {location_state['pending']['area_code']}")
+        if location_state["last_rejection"]:
+            st.caption(f"Most recent request response: {location_state['last_rejection']['reason']}")
+        render_staff_dashboard(user)
+        st.caption("NagrikSetu · Synthetic prototype · SLA targets and ownership data are demo assumptions.")
+        st.stop()
+    else:
+        visible_cases = []
     render_hero(
         "Government workspace",
         "NagrikSetu",
         "Review civic reports, record reasoned decisions, and follow each case's history.",
     )
-    counts = fetch_all(
-        "SELECT COUNT(*) AS cases, SUM(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) AS sub_issues "
-        "FROM complaints"
-    )[0]
-    languages = fetch_all("SELECT COUNT(DISTINCT language) AS n FROM complaints")[0]["n"]
+    counts = {"cases": len([row for row in visible_cases if row["parent_id"] is None]),
+              "sub_issues": len([row for row in visible_cases if row["parent_id"] is not None])}
+    languages = len({row["language"] for row in visible_cases})
+    visible_ids = [row["id"] for row in visible_cases]
+    open_challenges = 0
+    uncertain = 0
+    if visible_ids:
+        placeholders = ",".join("?" for _ in visible_ids)
+        metrics = fetch_all(
+            "SELECT (SELECT COUNT(*) FROM challenges h WHERE h.status='open' "
+            f"AND h.complaint_id IN ({placeholders})) AS open_challenges, "
+            "(SELECT COUNT(*) FROM complaints c WHERE c.id IN (" + placeholders + ") AND "
+            "(SELECT s.abstained FROM suggestions s WHERE s.complaint_id=c.id ORDER BY s.id DESC LIMIT 1)=1) AS uncertain",
+            visible_ids + visible_ids)[0]
+        open_challenges, uncertain = metrics["open_challenges"], metrics["uncertain"]
     c1, c2, c3 = st.columns(3)
-    c1.metric("Saved complaints", counts["cases"] or 0)
-    c2.metric("Linked sub-issues", counts["sub_issues"] or 0)
-    c3.metric("Input languages seen", languages or 0)
+    c1.metric("Complaints in verified areas", counts["cases"] or 0)
+    c2.metric("Needs human review", uncertain)
+    c3.metric("Open resident review requests", open_challenges)
+    st.caption(f"Linked sub-issues: {counts['sub_issues']} · languages represented: {languages}. "
+               "All counts are restricted to your verified service areas.")
 
     how_col, expect_col = st.columns([1.35, 1], gap="large")
     with how_col:

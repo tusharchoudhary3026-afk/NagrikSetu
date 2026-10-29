@@ -1,7 +1,15 @@
 from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
-from core.auth import authenticate, bootstrap_user
+from core.auth import begin_staff_registration, register_user, verify_staff_registration
+from core.db import execute
+
+
+def _staff_account(email, name="Test Staff", role="reviewer"):
+    execute("INSERT OR IGNORE INTO staff_directory(staff_email,full_name,role,department,status,registered,tag) "
+            "VALUES(?,?,?,'Grievance Cell','active',0,'SYNTHETIC')", (email, name, role))
+    flow = begin_staff_registration(email, name, "Safe!Green2026", "Safe!Green2026")
+    return verify_staff_registration(email, flow["simulated_code"])
 
 
 def test_logged_out_app_shell_keeps_navigation_registered_and_shows_login(monkeypatch, db):
@@ -24,14 +32,28 @@ def test_opening_protected_file_page_without_session_shows_sign_in_link(monkeypa
 
 
 def test_reviewer_can_open_the_role_filtered_navigation(monkeypatch, db):
-    bootstrap_user("reviewer", "long-password-example", "reviewer", "setup-token", "setup-token")
-    account = authenticate("reviewer", "long-password-example")
+    account = _staff_account("reviewer01@staff.nagriksetu-demo.example")
     root = Path(__file__).resolve().parent.parent
     app = AppTest.from_file(root / "app.py", default_timeout=20)
     app.session_state["authenticated_user"] = account
     app.run()
     assert not app.exception
     assert any("NagrikSetu" in item.value for item in app.markdown)
-    assert any("reviewer" in item.value for item in app.markdown)
-    assert sum(item.value.count("reviewer") for item in app.markdown) == 1
+    assert any("Reviewer" in item.value for item in app.markdown)
+    assert sum(item.value.count("Reviewer") for item in app.markdown) == 1
     assert len(app.sidebar.get("caption")) == 0
+
+
+def test_every_page_starts_headlessly_with_a_permitted_session(db):
+    root = Path(__file__).resolve().parent.parent
+    public = register_user("resident@app-test.example", "Test Resident", "Safe!Green2026",
+                           password_confirm="Safe!Green2026")
+    reviewer = _staff_account("reviewer01@staff.nagriksetu-demo.example")
+
+    for page in sorted((root / "pages").glob("*.py")):
+        account = public if page.name in {"10_Public_Portal.py", "8_Request_Review.py"} else reviewer
+        app = AppTest.from_file(root / "app.py", default_timeout=30)
+        app.session_state["authenticated_user"] = account
+        app.run()
+        app.switch_page(f"pages/{page.name}").run()
+        assert not app.exception, f"{page.name} raised: {[error.message for error in app.exception]}"

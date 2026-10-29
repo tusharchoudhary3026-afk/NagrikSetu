@@ -1,7 +1,5 @@
 import uuid
-from pathlib import Path
 import streamlit as st
-import streamlit.components.v1 as components
 
 from core import intake, ownership, router_baseline, splitter
 from core.attachment import save_attachment
@@ -11,18 +9,23 @@ from core.ledger import log_event
 from core.safety import flag_safety
 from core.security import attachment_encryption_status
 from core.speech import validate_transcript_submission
+from core.speech_component import speech_input
+from core.suggestions import selected_department
 from core.ui import apply_demo_style, render_hero, require_permission
+from core.geo import staff_area_scope
 
 init_db()
 user = require_permission("can_intake")
+if user.get("role") not in {"government", "operator", "reviewer"}:
+    st.error("Use the resident portal to submit a complaint.")
+    st.stop()
+assigned_areas = staff_area_scope(user["id"])
 apply_demo_style()
 render_hero("Complaint intake", "Complain here", "Capture the original report, inspect suggestions, and save it for a person to review.")
 st.warning(SIM_LABEL)
 
 speech_enabled = st.checkbox("I understand browser speech recognition may send audio to its provider; NagrikSetu does not store audio.")
-speech_component = components.declare_component(
-    "nyayaflow_speech_input", path=str(Path(__file__).resolve().parents[1] / "components" / "speech_input"))
-speech = speech_component(enabled=speech_enabled, key="nyayaflow_speech", default=None)
+speech = speech_input(enabled=speech_enabled, key="nyayaflow_speech", default=None)
 if speech and speech.get("id") != st.session_state.get("last_speech_id"):
     st.session_state["intake_text"] = speech.get("transcript", "")
     st.session_state["last_speech_id"] = speech["id"]
@@ -37,11 +40,25 @@ if speech_used:
     st.caption(f"Speech trial transcript · browser language {st.session_state.get('speech_language', 'unknown')} · "
                "Hindi-English mixed speech quality is unvalidated.")
 channel = st.selectbox("Channel", ["portal", "phone", "social", "in-person"])
-loc_hint = st.text_input("Location (optional, staff-assisted)")
+loc_hint = st.text_input("Street or landmark (optional, staff-assisted)")
+if assigned_areas:
+    area_by_key = {(row["state_code"], row["city_code"], row["area_code"]): row for row in assigned_areas}
+    selected_area = st.selectbox("Verified service area", list(area_by_key),
+                                 format_func=lambda key: " · ".join(str(area_by_key[key][part])
+                                                                     for part in ("state_name", "city_name", "area_name")))
+else:
+    selected_area = None
+    st.warning("No verified area is assigned. Staff-assisted intake stays unavailable until access is approved.")
 if st.button("Process complaint", type="primary"):
     try:
+        if not assigned_areas:
+            raise ValueError("You need a verified service area before using staff-assisted intake.")
         text = validate_transcript_submission(text, speech_used, transcript_confirmed)
         rec = intake.process(text, channel, loc_hint)
+        area = area_by_key[selected_area]
+        rec.update({key: area[key] for key in ("state_code", "state_name", "city_code", "city_name",
+                                               "area_code", "area_name")})
+        rec["location"] = loc_hint.strip() or area["area_name"]
         st.session_state["rec"] = rec
         st.session_state["split"] = splitter.propose_split(text)
         st.session_state["route"] = router_baseline.route(text)
@@ -55,6 +72,8 @@ if "rec" in st.session_state:
     st.subheader("Extracted fields")
     st.write({"language": rec["language"], "location": rec["location"], "issue": rec["issue"],
               "requested action": rec["requested_action"], "channel": rec["channel"]})
+    if rec.get("issue_evidence"):
+        st.caption("Matched issue words: " + ", ".join(rec["issue_evidence"]))
     st.caption("The original complaint is preserved separately and never replaced by normalized text.")
     question = intake.clarification_question(rec)
     if question:
@@ -100,15 +119,16 @@ if "rec" in st.session_state:
         try:
             cid = insert_complaint(rec)
             insert_suggestion(cid, "baseline", rt["top3"], rt["evidence"], rt["confidence"], rt["abstained"])
-            top = rt["top3"][0]["dept"] if rt["top3"] else None
+            top = selected_department(rt)
             log_event(cid, "suggested", "system", suggested_dept=top,
                       details={"abstained": rt["abstained"], "confidence": rt["confidence"],
-                               "safety_flags": safety.get("flags", [])})
+                               "safety_flags": safety.get("flags", []),
+                               "extracted_issue_evidence": rec.get("issue_evidence", [])}, actor_user=user)
             if photo is not None:
-                save_attachment(cid, photo, user["role"])
+                save_attachment(cid, photo, user["role"], actor_user=user)
             if confirm_split:
                 child_ids = splitter.confirm_split(cid, rec["case_id"], sp["parts"], user["role"],
-                                                   actor_email=user.get("email"))
+                                                   actor_email=user.get("email"), actor_user=user)
                 st.info(f"Human-confirmed split saved as {len(child_ids)} linked sub-issues.")
             st.success(f"Saved as {rec['case_id']}")
         except (ValueError, PermissionError) as exc:

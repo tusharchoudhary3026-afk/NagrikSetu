@@ -12,7 +12,7 @@ from core.attachment import get_attachments, save_attachment, read_attachment, m
 from core.speech import validate_transcript_submission
 from core.security import attachment_encryption_status
 from core.challenges import create_challenge, resolve_challenge
-from core.db import execute, fetch_all, insert_complaint
+from core.db import execute, fetch_all, insert_complaint, insert_suggestion
 from core import db as dbm
 from core.analytics import detect_emerging_hotspots
 from core.ledger import history, log_event
@@ -28,13 +28,13 @@ from core.intake import process
 from core.retraining import run_offline_retraining_experiment
 
 
-def complaint(text, case_id, location="unknown", issue="road"):
+def complaint(text, case_id, location="unknown", issue="road", submitted_by=None):
     return insert_complaint({
         "case_id": case_id, "parent_id": None, "original_text": text,
         "language": "english", "normalized_text": text.lower(), "channel": "portal",
         "location": location, "issue": issue, "requested_action": None,
         "missing_fields": "", "is_synthetic": 1,
-    })
+    }, submitted_by=submitted_by)
 
 
 def test_duplicate_candidate_evidence_and_no_automatic_link(db):
@@ -48,16 +48,20 @@ def test_duplicate_candidate_evidence_and_no_automatic_link(db):
     assert fetch_all("SELECT * FROM incident_links") == []
 
 
-def test_duplicate_decision_requires_reason_and_preserves_reversible_history(db):
+def test_duplicate_decision_requires_reason_and_preserves_reversible_history(db, staff_user):
+    reviewer = staff_user("reviewer")
     first = complaint("Pothole at Station Road", "CASE-1", "Station Road")
     second = complaint("Pothole at Station Road", "CASE-2", "Station Road")
     with pytest.raises(ValueError):
-        duplicates.record_decision(first, second, "same_incident", "reviewer", "")
-    duplicates.record_decision(first, second, "same_incident", "reviewer", "Same defect reported")
+        duplicates.record_decision(first, second, "same_incident", "reviewer", "", actor_user=reviewer)
+    duplicates.record_decision(first, second, "same_incident", "reviewer", "Same defect reported",
+                               reason_code="same_incident", actor_user=reviewer)
     before = fetch_all("SELECT * FROM incident_links")
-    duplicates.record_decision(first, second, "unlink", "reviewer", "Reports are from different days")
+    duplicates.record_decision(first, second, "unlink", "reviewer", "Reports are from different days",
+                               reason_code="reopen_after_review", actor_user=reviewer)
     with pytest.raises(ValueError, match="do not have an active incident link"):
-        duplicates.record_decision(first, second, "unlink", "reviewer", "Already unlinked")
+        duplicates.record_decision(first, second, "unlink", "reviewer", "Already unlinked",
+                                   reason_code="reopen_after_review", actor_user=reviewer)
     links = fetch_all("SELECT * FROM incident_links")
     assert links[0] == before[0] and len(links) == 2 and links[1]["active"] == 0
     events = fetch_all("SELECT event_type FROM ledger WHERE complaint_id=?", (first,))
@@ -76,25 +80,29 @@ def test_duplicate_candidate_different_date_is_suppressed_and_scores_are_not_pro
     assert row["score_kind"] == "candidate_score_not_probability"
 
 
-def test_canonical_incident_group_is_shared_across_confirmed_links(db):
+def test_canonical_incident_group_is_shared_across_confirmed_links(db, staff_user):
+    reviewer = staff_user("reviewer")
     first = complaint("Pothole at Station Road", "CASE-1", "Station Road")
     second = complaint("Pothole beside Station Road", "CASE-2", "Station Road")
     third = complaint("Pothole across Station Road", "CASE-3", "Station Road")
-    duplicates.record_decision(first, second, "same_incident", "reviewer", "Same damage site")
-    duplicates.record_decision(first, third, "same_incident", "reviewer", "Same damage site")
+    duplicates.record_decision(first, second, "same_incident", "reviewer", "Same damage site",
+                               reason_code="same_incident", actor_user=reviewer)
+    duplicates.record_decision(first, third, "same_incident", "reviewer", "Same damage site",
+                               reason_code="same_incident", actor_user=reviewer)
     links = fetch_all("SELECT incident_id FROM incident_links WHERE active=1 ORDER BY id")
     assert len(links) == 2 and links[0]["incident_id"] == links[1]["incident_id"]
     with pytest.raises(sqlite3.IntegrityError, match="append-only"):
         execute("DELETE FROM incident_links WHERE id=?", (1,))
 
 
-def test_duplicate_candidates_ignore_inactive_split_children(db):
+def test_duplicate_candidates_ignore_inactive_split_children(db, staff_user):
+    reviewer = staff_user("reviewer")
     parent_id = complaint("Streetlight is broken and garbage is piled near park", "CASE-INACTIVE-CANDIDATE")
     children = confirm_split(parent_id, "CASE-INACTIVE-CANDIDATE", [
         {"text": "Streetlight is broken", "suggestion": {"top3": [], "evidence": {}, "confidence": 0, "abstained": True}},
         {"text": "Garbage is piled near park", "suggestion": {"top3": [], "evidence": {}, "confidence": 0, "abstained": True}},
-    ], "reviewer")
-    merge_back(parent_id, "reviewer")
+    ], "reviewer", actor_user=reviewer)
+    merge_back(parent_id, "reviewer", actor_user=reviewer)
     assert all(row["complaint_id"] not in children for row in duplicates.find_candidates(parent_id))
     with pytest.raises(ValueError, match="Complaint not found"):
         duplicates.find_candidates(children[0])
@@ -146,7 +154,34 @@ def test_db_initialization_migrates_preexisting_prototype_tables(tmp_path, monke
         {row["name"] for row in dbm.fetch_all("PRAGMA table_info(corrections)")})
 
 
-def test_attachment_migration_marks_old_files_plaintext_and_denies_decryption(tmp_path, monkeypatch):
+def test_db_initialization_adds_duplicate_reason_code_idempotently(tmp_path, monkeypatch):
+    path = tmp_path / "legacy-duplicates.db"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE complaints (id INTEGER PRIMARY KEY, case_id TEXT, parent_id INTEGER,
+            original_text TEXT, language TEXT, normalized_text TEXT, channel TEXT, location TEXT,
+            issue TEXT, requested_action TEXT, missing_fields TEXT, is_synthetic INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        INSERT INTO complaints (id, case_id, original_text) VALUES (1, 'LEGACY-A', 'pothole');
+        INSERT INTO complaints (id, case_id, original_text) VALUES (2, 'LEGACY-B', 'pothole');
+        CREATE TABLE duplicate_reviews (id INTEGER PRIMARY KEY, complaint_id INTEGER,
+            candidate_complaint_id INTEGER, decision TEXT, actor TEXT, reason TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        INSERT INTO duplicate_reviews (complaint_id,candidate_complaint_id,decision,actor,reason)
+            VALUES (1,2,'same_incident','reviewer','legacy decision');
+    """)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(dbm, "DB_PATH", path)
+
+    dbm.init_db()
+    dbm.init_db()
+
+    rows = dbm.fetch_all("SELECT reason_code FROM duplicate_reviews")
+    assert rows[0]["reason_code"] == "legacy_reason"
+
+
+def test_attachment_migration_marks_old_files_plaintext_and_denies_decryption(tmp_path, monkeypatch, staff_user):
     import secrets
     path = tmp_path / "legacy-attachments.db"
     legacy_file = tmp_path / "old.png"
@@ -162,44 +197,52 @@ def test_attachment_migration_marks_old_files_plaintext_and_denies_decryption(tm
     conn.close()
     monkeypatch.setattr(dbm, "DB_PATH", path)
     dbm.init_db()
+    reviewer = staff_user("reviewer")
+    complaint("Legacy photo record", "CASE-LEGACY-PHOTO")
     row = fetch_all("SELECT is_encrypted FROM attachments WHERE id=1")[0]
     assert row["is_encrypted"] == 0
     with pytest.raises(ValueError, match="legacy photo is not encrypted"):
-        read_attachment(1, "reviewer")
+        read_attachment(1, "reviewer", actor_user=reviewer)
     monkeypatch.setenv("NYAYAFLOW_ATTACHMENT_KEY", secrets.token_hex(32))
     assert migrate_legacy_attachments() == 1
-    migrated_row = get_attachments(1, "reviewer")[0]
+    migrated_row = get_attachments(1, "reviewer", actor_user=reviewer)[0]
     assert migrated_row["is_encrypted"] == 1 and not legacy_file.exists()
-    decrypted = Image.open(io.BytesIO(read_attachment(1, "reviewer")))
+    decrypted = Image.open(io.BytesIO(read_attachment(1, "reviewer", actor_user=reviewer)))
     assert decrypted.size == (2, 2)
 
 
-def test_attachment_validation_and_review_access(db, tmp_path, monkeypatch):
+def test_attachment_validation_and_review_access(db, tmp_path, monkeypatch, staff_user):
     import secrets
     monkeypatch.setenv("NYAYAFLOW_ATTACHMENT_KEY", secrets.token_hex(32))
     cid = complaint("Broken streetlight", "CASE-ATTACH")
+    operator = staff_user("operator", "Electricity Dept")
+    reviewer = staff_user("reviewer")
+    insert_suggestion(cid, "baseline", [{"dept": "Electricity Dept", "score": .8}], {}, .8, False)
     monkeypatch.setattr("core.attachment.ATTACHMENT_DIR", tmp_path)
     upload = io.BytesIO(b"not really an image")
     upload.name = "evidence.jpg"
     with pytest.raises(ValueError, match="image"):
-        save_attachment(cid, upload, actor_role="operator")
+        save_attachment(cid, upload, actor_role="operator", actor_user=operator)
     image = io.BytesIO()
     Image.new("RGB", (2, 2), "red").save(image, format="PNG")
     image.name = "../../private.png"
-    stored = save_attachment(cid, image, actor_role="operator")
+    stored = save_attachment(cid, image, actor_role="operator", actor_user=operator)
     assert stored and (tmp_path / stored).is_file()
     with pytest.raises(PermissionError):
         get_attachments(cid, actor_role="auditor")
-    assert len(get_attachments(cid, actor_role="reviewer")) == 1
+    assert len(get_attachments(cid, actor_role="reviewer", actor_user=reviewer)) == 1
 
 
-def test_challenge_resolution_is_audited_and_reason_required(db):
-    cid = complaint("Streetlight is broken", "CASE-CH")
-    challenge_id = create_challenge(cid, "citizen", "Wrong department")
+def test_challenge_resolution_is_audited_and_reason_required(db, staff_user):
+    resident = auth.register_user("challenge-resident@example.test", "Resident", "Secure!River72",
+                                  password_confirm="Secure!River72")
+    cid = complaint("Streetlight is broken", "CASE-CH", submitted_by=resident["id"])
+    challenge_id = create_challenge(cid, "citizen", "Wrong department", citizen_user_id=resident["id"])
+    reviewer = staff_user("reviewer")
     with pytest.raises(ValueError):
-        resolve_challenge(challenge_id, "reviewer", "", "accept")
+        resolve_challenge(challenge_id, "reviewer", "", "accept", actor_user=reviewer)
     resolve_challenge(challenge_id, "reviewer", "Electrical team confirmed", "edit",
-                      final_dept="Electricity Dept", reason_code="wrong_category")
+                      final_dept="Electricity Dept", reason_code="wrong_category", actor_user=reviewer)
     row = fetch_all("SELECT * FROM challenges WHERE id=?", (challenge_id,))[0]
     assert (row["status"], row["resolved_by"], row["resolution"]) == (
         "resolved", "reviewer", "Electrical team confirmed")
@@ -207,10 +250,12 @@ def test_challenge_resolution_is_audited_and_reason_required(db):
 
 
 def test_duplicate_open_challenges_are_rejected(db):
-    cid = complaint("Streetlight is broken", "CASE-CH-DUP")
-    create_challenge(cid, "citizen", "Please review this routing")
+    resident = auth.register_user("open-resident@example.test", "Resident", "Secure!River72",
+                                  password_confirm="Secure!River72")
+    cid = complaint("Streetlight is broken", "CASE-CH-DUP", submitted_by=resident["id"])
+    create_challenge(cid, "citizen", "Please review this routing", citizen_user_id=resident["id"])
     with pytest.raises(ValueError, match="already open"):
-        create_challenge(cid, "citizen", "Duplicate request")
+        create_challenge(cid, "citizen", "Duplicate request", citizen_user_id=resident["id"])
 
 
 def test_reassignment_analytics_use_transfer_events_and_correct_timestamp_column(db):
@@ -264,32 +309,37 @@ def test_privacy_masks_name_phone_and_email():
     assert "ravi@example.org" not in masked
 
 
-def test_audit_export_masks_contacts_and_enforces_read_access(db):
+def test_audit_export_masks_contacts_and_enforces_read_access(db, staff_user):
     cid = complaint("Streetlight", "CASE-AUDIT")
     log_event(cid, "challenge", "citizen", reason="Contact Ravi Kumar at +91 9876543210")
     with pytest.raises(PermissionError):
         generate_audit_export("operator")
-    export = generate_audit_export("auditor")
+    auditor = staff_user("auditor")
+    export = generate_audit_export("auditor", actor_user=auditor)
     assert "Ravi Kumar" not in export and "9876543210" not in export
 
 
-def test_review_override_is_atomic_and_preserves_previous_suggestion(db):
+def test_review_override_is_atomic_and_preserves_previous_suggestion(db, staff_user):
+    reviewer = staff_user("reviewer")
     cid = complaint("Streetlight broken near station road", "CASE-REVIEW")
     from core.db import insert_suggestion
     insert_suggestion(cid, "baseline", [{"dept": "Roads Dept", "score": 1}], {}, 1, 0)
     with pytest.raises(ValueError):
-        submit_review(cid, "reviewer", "edit", "Electricity Dept", "because", None)
+        submit_review(cid, "reviewer", "edit", "Electricity Dept", "because", None, actor_user=reviewer)
     assert fetch_all("SELECT * FROM ledger WHERE complaint_id=?", (cid,)) == []
-    submit_review(cid, "reviewer", "edit", "Electricity Dept", "Streetlight wiring", "wrong_category")
-    event = history(cid)[0]
+    submit_review(cid, "reviewer", "edit", "Electricity Dept", "Streetlight wiring", "wrong_category",
+                  actor_user=reviewer)
+    event = history(cid, actor_user=reviewer)[0]
     assert event["suggested_dept"] == "Roads Dept" and event["final_dept"] == "Electricity Dept"
     assert fetch_all("SELECT wrong_dept,correct_dept FROM corrections WHERE complaint_id=?", (cid,)) == [
         {"wrong_dept": "Roads Dept", "correct_dept": "Electricity Dept"}]
     correction_id = fetch_all("SELECT id FROM corrections WHERE complaint_id=?", (cid,))[0]["id"]
     assert load_verified_corrections() == []
-    review_correction(correction_id, "reviewer-1", "reviewer", "verified", "Checked against independent source")
+    review_correction(correction_id, "reviewer-1", "reviewer", "verified", "Checked against independent source",
+                      actor_user=reviewer)
     assert [row["id"] for row in load_verified_corrections()] == [correction_id]
-    review_correction(correction_id, "reviewer-2", "reviewer", "rejected", "Rule remains unconfirmed")
+    review_correction(correction_id, "reviewer-2", "reviewer", "rejected", "Rule remains unconfirmed",
+                      actor_user=reviewer)
     assert load_verified_corrections() == []
 
 
@@ -313,14 +363,15 @@ def test_grounded_explanation_needs_text_and_traceable_rule():
         generate_grounded_explanation("Please help", "Electricity Dept")
 
 
-def test_split_confirmation_and_merge_back_keep_original_child_history(db):
+def test_split_confirmation_and_merge_back_keep_original_child_history(db, staff_user):
+    reviewer = staff_user("reviewer")
     cid = complaint("Streetlight is broken and garbage is piled near park", "CASE-SPLIT")
     ids = confirm_split(cid, "CASE-SPLIT", [
         {"text": "Streetlight is broken", "suggestion": {"top3": [], "evidence": {}, "confidence": 0, "abstained": True}},
         {"text": "Garbage is piled near park", "suggestion": {"top3": [], "evidence": {}, "confidence": 0, "abstained": True}},
-    ], "reviewer")
+    ], "reviewer", actor_user=reviewer)
     assert len(ids) == 2
-    assert merge_back(cid, "reviewer") == 2
+    assert merge_back(cid, "reviewer", actor_user=reviewer) == 2
     assert fetch_all("SELECT is_active FROM complaints WHERE id IN (?,?) ORDER BY id", tuple(ids)) == [
         {"is_active": 0}, {"is_active": 0}]
     assert [event["event_type"] for event in history(cid)] == ["split_confirmed", "split_merged_back"]
@@ -350,23 +401,26 @@ def test_speech_transcript_requires_confirmation_and_nonempty_text():
         validate_transcript_submission("  ", speech_used=False, confirmed=False)
 
 
-def test_photo_attachments_are_encrypted_at_rest_and_read_only_by_reviewers(db, monkeypatch, tmp_path):
+def test_photo_attachments_are_encrypted_at_rest_and_read_only_by_reviewers(db, monkeypatch, tmp_path, staff_user):
     import secrets
     monkeypatch.setenv("NYAYAFLOW_ATTACHMENT_KEY", secrets.token_hex(32))
     monkeypatch.setattr("core.attachment.ATTACHMENT_DIR", tmp_path / "attachments")
+    operator = staff_user("operator", "Grievance Cell")
+    reviewer = staff_user("reviewer")
     cid = complaint("Photo evidence", "CASE-SECURE-PHOTO")
+    insert_suggestion(cid, "baseline", [{"dept": "Grievance Cell", "score": .8}], {}, .8, False)
     image = Image.new("RGB", (2, 2), color="red")
     source = io.BytesIO()
     image.save(source, format="PNG")
     raw_image = source.getvalue()
     filename = save_attachment(cid, type("Upload", (), {
         "name": "evidence.png", "getvalue": lambda self: raw_image,
-    })(), "operator")
-    row = get_attachments(cid, "reviewer")[0]
+    })(), "operator", actor_user=operator)
+    row = get_attachments(cid, "reviewer", actor_user=reviewer)[0]
     stored = Path(row["file_path"]).read_bytes()
     assert row["is_encrypted"] == 1
     assert stored.startswith(b"NF01") and raw_image not in stored
-    decrypted = Image.open(io.BytesIO(read_attachment(row["id"], "reviewer")))
+    decrypted = Image.open(io.BytesIO(read_attachment(row["id"], "reviewer", actor_user=reviewer)))
     assert decrypted.format == "PNG" and decrypted.size == (2, 2)
     assert decrypted.convert("RGB").tobytes() == Image.open(io.BytesIO(raw_image)).convert("RGB").tobytes()
     with pytest.raises(PermissionError):

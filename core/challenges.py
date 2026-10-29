@@ -1,15 +1,30 @@
 """Citizen/staff review requests with transactional, append-only resolution events."""
 from .auth import enforce_rbac
 from .db import get_conn
+from .geo import authorize_staff_complaint
+from .auth import enforce_rbac
 
 
-def create_challenge(complaint_id: int, raised_by: str, reason: str, actor_email: str | None = None) -> int:
+def create_challenge(complaint_id: int, raised_by: str, reason: str, actor_email: str | None = None,
+                     actor_user: dict | None = None, citizen_user_id: int | None = None) -> int:
     if raised_by not in {"citizen", "staff"} or not (reason or "").strip():
         raise ValueError("A valid requester and a reason are required.")
     conn = get_conn()
     try:
-        if not conn.execute("SELECT 1 FROM complaints WHERE id=?", (complaint_id,)).fetchone():
+        complaint = conn.execute("SELECT submitted_by FROM complaints WHERE id=?", (complaint_id,)).fetchone()
+        if not complaint:
             raise ValueError("Complaint not found.")
+        if raised_by == "staff":
+            if not actor_user:
+                raise PermissionError("Pass the authenticated staff account to check its assigned area.")
+            enforce_rbac(actor_user.get("role"), "can_review")
+            authorize_staff_complaint(actor_user.get("role"), complaint_id, actor_user)
+        elif citizen_user_id is None or complaint["submitted_by"] != citizen_user_id:
+            raise PermissionError("Residents can request review only for their own complaint.")
+        else:
+            account = conn.execute("SELECT role,active FROM users WHERE id=?", (citizen_user_id,)).fetchone()
+            if not account or not account["active"] or account["role"] != "public":
+                raise PermissionError("An active resident account is required.")
         conn.execute("BEGIN IMMEDIATE")
         if conn.execute("SELECT 1 FROM challenges WHERE complaint_id=? AND status='open' LIMIT 1",
                          (complaint_id,)).fetchone():
@@ -29,7 +44,7 @@ def create_challenge(complaint_id: int, raised_by: str, reason: str, actor_email
 
 def resolve_challenge(challenge_id: int, actor_role: str, resolution: str, outcome: str,
                       final_dept: str | None = None, reason_code: str | None = None,
-                      actor_email: str | None = None) -> None:
+                      actor_email: str | None = None, actor_user: dict | None = None) -> None:
     enforce_rbac(actor_role, "can_review")
     resolution = (resolution or "").strip()
     if not resolution:
@@ -51,12 +66,14 @@ def resolve_challenge(challenge_id: int, actor_role: str, resolution: str, outco
             raise ValueError("Review request not found.")
         if challenge["status"] != "open":
             raise ValueError("This review request has already been resolved.")
+        authorize_staff_complaint(actor_role, challenge["complaint_id"], actor_user)
         suggestion = conn.execute(
-            "SELECT top3 FROM suggestions WHERE complaint_id=? ORDER BY id DESC LIMIT 1",
+            "SELECT top3,abstained FROM suggestions WHERE complaint_id=? ORDER BY id DESC LIMIT 1",
             (challenge["complaint_id"],)).fetchone()
         import json
         top3 = json.loads(suggestion["top3"]) if suggestion else []
-        suggested = top3[0]["dept"] if top3 else None
+        from .suggestions import selected_department
+        suggested = selected_department({"top3": top3, "abstained": bool(suggestion and suggestion["abstained"])}) if suggestion else None
         conn.execute("UPDATE challenges SET status='resolved',resolved_by=?,resolution=?,outcome=?,"
                      "resolved_at=datetime('now') WHERE id=? AND status='open'",
                      (actor_email or actor_role, resolution, outcome, challenge_id))

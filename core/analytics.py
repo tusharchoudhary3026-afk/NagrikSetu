@@ -3,11 +3,17 @@ from datetime import datetime, timedelta, timezone
 
 from .config import REASON_CODES, SIM_LABEL
 from .db import fetch_all
+from .geo import scoped_ids_clause, require_complaint_area_access
+from .geo import STAFF_ROLES
 
 
-def get_reassignment_breakdown():
-    rows = fetch_all("SELECT reason_code, COUNT(*) AS count FROM ledger "
-                     "WHERE event_type='transfer' AND reason_code IS NOT NULL GROUP BY reason_code")
+def get_reassignment_breakdown(actor_user: dict | None = None):
+    where = "event_type='transfer' AND reason_code IS NOT NULL"
+    params = []
+    if actor_user and actor_user.get("role") in STAFF_ROLES:
+        clause, params = scoped_ids_clause(actor_user, "complaint_id")
+        where += f" AND {clause}"
+    rows = fetch_all(f"SELECT reason_code, COUNT(*) AS count FROM ledger WHERE {where} GROUP BY reason_code", params)
     counts = {row["reason_code"]: row["count"] for row in rows}
     total = sum(counts.values())
     return {"total": total, "by_reason": {
@@ -16,19 +22,25 @@ def get_reassignment_breakdown():
     }}
 
 
-def get_ownership_gap_report():
+def get_ownership_gap_report(actor_user: dict | None = None):
     """Counts explicitly recorded ownership-overlap transfers by department pair."""
-    rows = fetch_all("SELECT suggested_dept, final_dept, COUNT(*) AS count FROM ledger "
-                     "WHERE event_type='transfer' AND reason_code='overlapping_ownership' "
-                     "AND suggested_dept IS NOT NULL AND final_dept IS NOT NULL "
-                     "GROUP BY suggested_dept, final_dept ORDER BY count DESC")
+    where = ("event_type='transfer' AND reason_code='overlapping_ownership' "
+             "AND suggested_dept IS NOT NULL AND final_dept IS NOT NULL")
+    params = []
+    if actor_user and actor_user.get("role") in STAFF_ROLES:
+        clause, params = scoped_ids_clause(actor_user, "complaint_id")
+        where += f" AND {clause}"
+    rows = fetch_all("SELECT suggested_dept, final_dept, COUNT(*) AS count FROM ledger WHERE "
+                     f"{where} GROUP BY suggested_dept, final_dept ORDER BY count DESC", params)
     denominator = sum(row["count"] for row in rows)
     return [{"from_department": row["suggested_dept"], "to_department": row["final_dept"],
              "count": row["count"], "denominator": denominator, "status_label": SIM_LABEL}
             for row in rows]
 
 
-def get_case_reassignment_timeline(complaint_id: int):
+def get_case_reassignment_timeline(complaint_id: int, actor_user: dict | None = None):
+    if actor_user and actor_user.get("role") in STAFF_ROLES:
+        require_complaint_area_access(actor_user, complaint_id)
     cases = fetch_all("SELECT case_id FROM complaints WHERE id=?", (complaint_id,))
     if not cases:
         return []
@@ -40,7 +52,8 @@ def get_case_reassignment_timeline(complaint_id: int):
 
 
 def detect_emerging_hotspots(min_count: int = 3, window_days: int = 7,
-                             as_of: datetime | None = None, min_increase: int = 1):
+                             as_of: datetime | None = None, min_increase: int = 1,
+                             actor_user: dict | None = None):
     """Compare the latest window with the immediately preceding equal-length window."""
     if min_count < 1 or window_days < 1 or min_increase < 1:
         raise ValueError("Counts and time window must be positive.")
@@ -48,9 +61,12 @@ def detect_emerging_hotspots(min_count: int = 3, window_days: int = 7,
     end = end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
     start = end - timedelta(days=window_days)
     baseline_start = start - timedelta(days=window_days)
-    rows = fetch_all("SELECT location,issue,created_at,is_synthetic FROM complaints "
-                     "WHERE location IS NOT NULL AND TRIM(location)<>'' AND LOWER(location)<>'unknown' "
-                     "AND issue IS NOT NULL")
+    where = "location IS NOT NULL AND TRIM(location)<>'' AND LOWER(location)<>'unknown' AND issue IS NOT NULL"
+    params = []
+    if actor_user and actor_user.get("role") in STAFF_ROLES:
+        clause, params = scoped_ids_clause(actor_user, "id")
+        where += f" AND {clause}"
+    rows = fetch_all("SELECT location,issue,created_at,is_synthetic FROM complaints WHERE " + where, params)
     groups = {}
     for row in rows:
         try:

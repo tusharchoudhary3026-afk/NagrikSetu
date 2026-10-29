@@ -106,6 +106,10 @@ def tune_duplicate_threshold():
         "weights": {"text": 0.65, "location": 0.2, "time": 0.15},
         "tuned_on_split": "dev",
         "tuning_metric": "F1 with a preferred precision floor of 0.80",
+        "dev_precision_floor": 0.80,
+        "dev_precision_floor_met": best["precision"] >= 0.80,
+        "dev_tuning_note": ("preferred precision floor met" if best["precision"] >= 0.80 else
+                            "no non-zero-prediction dev threshold met the preferred precision floor; selected best F1 on dev"),
         "dev_pairs": len(dev),
         "dev_true_positive": best["true_positive"],
         "dev_false_positive": best["false_positive"],

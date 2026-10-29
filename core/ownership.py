@@ -8,6 +8,13 @@ def load_table():
     return pd.read_csv(RESP_TABLE, encoding='utf-8-sig')
 
 
+def unverified_rows(table=None):
+    """Return ownership rules not explicitly verified by an authoritative source."""
+    t = table if table is not None else load_table()
+    verification = t.get("verification", pd.Series("", index=t.index)).fillna("")
+    return t[verification.astype(str).str.strip().str.casefold() != "verified"].copy()
+
+
 def check(dept: str, table=None):
     t = table if table is not None else load_table()
     out = []

@@ -1,1 +1,5 @@
-{"tfidf": 0.4}
+{
+  "tfidf": null,
+  "source": null,
+  "validation_target_met": false
+}

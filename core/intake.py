@@ -6,9 +6,11 @@ HINGLISH_WORDS = {"nahi", "hai", "hain", "pe", "par", "mein", "me", "ka", "ki", 
 NORMALIZE = {"pani": "paani", "sadak": "road", "kachra": "garbage", "bijli": "electricity",
              "nali": "drain", "gali": "lane"}
 LOCATION_PATTERNS = [
-    r"ward\s*(?:no\.?|number)?\s*\d+",
-    r"(?:near|nearby|paas)\s+[A-Za-z\u0900-\u097F ]{3,30}",
-    r"[A-Za-z\u0900-\u097F]+(?: [A-Za-z\u0900-\u097F]+)?\s+(?:road|marg|chowk|colony|nagar|lane)",
+    r"(?<!\w)(?:ward\s*(?:no\.?|number)?|वार्ड\s*(?:नं\.?|नंबर)?)\s*\d+",
+    r"(?<!\w)[A-Za-z\u0900-\u097F]+(?:\s+[A-Za-z\u0900-\u097F]+){0,2}\s+"
+    r"(?:road|marg|chowk|colony|nagar|lane|मार्ग|चौक|कॉलोनी|नगर|गली|लेन|सड़क|रोड)(?=\W|$)",
+    r"(?:near|nearby|paas|पास|के पास)\s+[A-Za-z\u0900-\u097F ]{2,40}",
+    r"(?<!\w)[A-Za-z]+(?:\s+[A-Za-z]+){0,2}\s+(?:park|market|school|gate|temple|bus stop|bus stand)",
 ]
 REQUIRED_FIELDS = ["location", "issue"]
 ISSUE_CATEGORIES = [
@@ -46,19 +48,36 @@ VAGUE = re.compile(r"\b(my|our|the|this|that|your|mere|meri|mere ghar)\b|\b(hous
 
 
 def extract_location(text: str) -> str:
-    for p in LOCATION_PATTERNS:
-        m = re.search(p, text, flags=re.I)
-        if m and not VAGUE.search(m.group(0)):   # "near my house" is not a usable location
-            return m.group(0).strip()
+    for pattern in LOCATION_PATTERNS:
+        for match in re.finditer(pattern, text or "", flags=re.I):
+            candidate = re.sub(r"^(?:(?:the|near|nearby|at|in|on)\s+)+", "", match.group(0).strip(), flags=re.I)
+            candidate = re.sub(r"\s+(?:के पास|पास)$", "", candidate, flags=re.I).strip(" .,!?।")
+            normalized = re.sub(r"\s+", " ", candidate).casefold()
+            generic = {"road", "main road", "street", "main street", "lane", "main lane",
+                       "मार्ग", "सड़क", "रोड", "गली", "park", "market", "school", "बस स्टैंड"}
+            if not candidate or normalized in generic:
+                continue
+            if re.search(r"\b(?:my|our|your|this|that|house|home|ghar)\b", candidate, flags=re.I):
+                continue
+            return candidate
     return "unknown"                # never invent
 
 
-def extract_issue(text: str) -> str:
+def extract_issue_evidence(text: str) -> tuple[str, list[str]]:
     lowered = (text or "").casefold()
     for category, terms in ISSUE_CATEGORIES:
-        if any(term.casefold() in lowered for term in terms):
-            return category
-    return "unknown"
+        matched = []
+        for term in terms:
+            expression = r"(?<!\w)" + r"\s+".join(re.escape(part) for part in term.casefold().split()) + r"(?!\w)"
+            if re.search(expression, lowered):
+                matched.append(term)
+        if matched:
+            return category, matched
+    return "unknown", []
+
+
+def extract_issue(text: str) -> str:
+    return extract_issue_evidence(text)[0]
 
 
 def extract_requested_action(text: str) -> str | None:
@@ -76,13 +95,15 @@ def process(text: str, channel: str = "portal", location_hint: str | None = None
     if channel not in {"portal", "phone", "social", "in-person"}:
         raise ValueError("Choose a supported intake channel.")
     loc = location_hint.strip() if location_hint and location_hint.strip() else extract_location(text)
+    issue, issue_evidence = extract_issue_evidence(text)
     rec = {
         "original_text": text,
         "language": detect_language(text),
         "normalized_text": normalize(text),
         "channel": channel,
         "location": loc,
-        "issue": extract_issue(text),
+        "issue": issue,
+        "issue_evidence": issue_evidence,
         "requested_action": extract_requested_action(text),
         "is_synthetic": 1,
     }

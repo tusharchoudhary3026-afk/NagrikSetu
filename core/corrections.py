@@ -3,10 +3,12 @@ import json
 
 from .auth import enforce_rbac
 from .db import get_conn, fetch_all
+from .geo import authorize_staff_complaint
 
 
 def review_correction(correction_id: int, reviewer: str, actor_role: str,
-                      status: str, reason: str, actor_email: str | None = None) -> None:
+                      status: str, reason: str, actor_email: str | None = None,
+                      actor_user: dict | None = None) -> None:
     enforce_rbac(actor_role, "can_review")
     if status not in {"verified", "rejected"}:
         raise ValueError("Correction status must be verified or rejected.")
@@ -17,6 +19,7 @@ def review_correction(correction_id: int, reviewer: str, actor_role: str,
         correction = conn.execute("SELECT complaint_id FROM corrections WHERE id=?", (correction_id,)).fetchone()
         if not correction:
             raise ValueError("Correction example not found.")
+        authorize_staff_complaint(actor_role, correction["complaint_id"], actor_user)
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("INSERT INTO correction_reviews (correction_id,reviewer,status,reason) VALUES (?,?,?,?)",
                      (correction_id, reviewer.strip(), status, reason.strip()))

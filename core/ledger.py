@@ -2,10 +2,14 @@
 import json
 from .config import REASON_REQUIRED
 from .db import execute, fetch_all
+from .geo import authorize_staff_complaint
+from .geo import STAFF_ROLES
 
 
 def log_event(complaint_id, event_type, actor, suggested_dept=None, final_dept=None,
-              reason=None, reason_code=None, details=None):
+              reason=None, reason_code=None, details=None, actor_user=None):
+    if actor_user and actor_user.get("role") in STAFF_ROLES:
+        authorize_staff_complaint(actor_user["role"], complaint_id, actor_user)
     if event_type in REASON_REQUIRED and not (reason or "").strip():
         raise ValueError(f"A reason is mandatory for '{event_type}'.")
     if event_type in {"edit", "escalate", "transfer"} and reason_code not in {
@@ -19,7 +23,9 @@ def log_event(complaint_id, event_type, actor, suggested_dept=None, final_dept=N
          json.dumps(details) if details else None))
 
 
-def history(complaint_id):
+def history(complaint_id, actor_user=None):
+    if actor_user and actor_user.get("role") in STAFF_ROLES:
+        authorize_staff_complaint(actor_user["role"], complaint_id, actor_user)
     return fetch_all("SELECT * FROM ledger WHERE complaint_id=? ORDER BY id", (complaint_id,))
 
 

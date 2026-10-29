@@ -40,15 +40,18 @@ if st.button("Run frozen test evaluation"):
     curve = pd.DataFrame(comparison["component_4_curve"]).set_index("threshold")
     st.markdown("**Validation-only coverage / accuracy threshold curve**")
     st.line_chart(curve[["accuracy", "coverage"]])
-    st.caption(f"Validation-selected TF-IDF threshold: {comparison['threshold_used']}. "
-               "Results are preliminary on a small synthetic dataset; no fairness or real-world performance claim is made.")
+    if comparison["threshold_used"] is None:
+        st.warning("Validation did not meet the minimum coverage target. TF-IDF is not cleared to answer; its cases remain for human review.")
+    else:
+        st.caption(f"Validation-selected TF-IDF threshold: {comparison['threshold_used']}. "
+                   "Results are preliminary on a small synthetic dataset; no fairness or real-world performance claim is made.")
     st.subheader("Reassignment reasons")
-    st.write(get_reassignment_breakdown())
+    st.write(get_reassignment_breakdown(user))
     st.caption("Counts describe recorded transfers; they do not establish avoidability or fault.")
     st.subheader("Ownership gap report")
-    st.dataframe(get_ownership_gap_report(), width="stretch")
+    st.dataframe(get_ownership_gap_report(user), width="stretch")
     st.subheader("Potential concentration for staff review")
-    st.dataframe(detect_emerging_hotspots(), width="stretch")
+    st.dataframe(detect_emerging_hotspots(actor_user=user), width="stretch")
 
 st.divider()
 st.subheader("Offline correction experiment")

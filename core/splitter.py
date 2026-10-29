@@ -5,6 +5,8 @@ from . import router_baseline
 from .db import get_conn
 from .auth import enforce_rbac
 from .intake import process
+from .suggestions import selected_department
+from .geo import authorize_staff_complaint
 
 CONNECTORS = r"\band\b|\baur\b|(?<!\S)और(?!\S)|\bplus\b|;|\.\s+(?=[A-Z\u0900-\u097F])"
 
@@ -15,7 +17,7 @@ def propose_split(text: str):
         return {"is_compound": False, "parts": [], "note": "single issue"}
     kw = router_baseline.load_keywords()
     routed = [(p, router_baseline.route(p, kw)) for p in parts]
-    depts = {r["top3"][0]["dept"] for _, r in routed if r["top3"]}
+    depts = {department for _, r in routed if (department := selected_department(r))}
     # Parts that map to one department, or have no signal, are NOT split.
     if len(depts) < 2:
         return {"is_compound": False, "parts": [],
@@ -26,7 +28,7 @@ def propose_split(text: str):
 
 
 def confirm_split(parent_id: int, case_id: str, parts: list[dict], actor_role: str,
-                  actor_email: str | None = None) -> list[int]:
+                  actor_email: str | None = None, actor_user: dict | None = None) -> list[int]:
     """Persist human-confirmed child issues, keeping the original parent intact."""
     enforce_rbac(actor_role, "can_review")
     if len(parts) < 2 or any(not str(part.get("text", "")).strip() for part in parts):
@@ -36,6 +38,7 @@ def confirm_split(parent_id: int, case_id: str, parts: list[dict], actor_role: s
         parent = conn.execute("SELECT * FROM complaints WHERE id=?", (parent_id,)).fetchone()
         if not parent:
             raise ValueError("Parent complaint not found.")
+        authorize_staff_complaint(actor_role, parent_id, actor_user)
         conn.execute("BEGIN IMMEDIATE")
         active = conn.execute("SELECT id FROM complaints WHERE parent_id=? AND is_active=1", (parent_id,)).fetchall()
         if active:
@@ -46,11 +49,12 @@ def confirm_split(parent_id: int, case_id: str, parts: list[dict], actor_role: s
             rec = process(text, channel=parent["channel"])
             rec["case_id"], rec["parent_id"], rec["is_synthetic"] = case_id, parent_id, parent["is_synthetic"]
             cur = conn.execute(
-                "INSERT INTO complaints (case_id,parent_id,original_text,language,normalized_text,channel,location,issue,requested_action,missing_fields,is_synthetic) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO complaints (case_id,parent_id,original_text,language,normalized_text,channel,location,issue,requested_action,missing_fields,is_synthetic,state_code,state_name,city_code,city_name,area_code,area_name) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (rec["case_id"], rec["parent_id"], rec["original_text"], rec["language"],
                  rec["normalized_text"], rec["channel"], rec["location"], rec["issue"],
-                 rec["requested_action"], rec["missing_fields"], rec["is_synthetic"]))
+                 rec["requested_action"], rec["missing_fields"], rec["is_synthetic"], parent["state_code"],
+                 parent["state_name"], parent["city_code"], parent["city_name"], parent["area_code"], parent["area_name"]))
             child_id = cur.lastrowid
             ids.append(child_id)
             result = part.get("suggestion") or router_baseline.route(text)
@@ -59,9 +63,9 @@ def confirm_split(parent_id: int, case_id: str, parts: list[dict], actor_role: s
                           json.dumps(result.get("evidence", {})), result.get("confidence", 0.0),
                           int(bool(result.get("abstained", True)))))
             conn.execute("INSERT INTO ledger (complaint_id,event_type,actor,suggested_dept,details) VALUES (?,?,?,?,?)",
-                         (child_id, "suggested", "system",
-                          result.get("top3", [{}])[0].get("dept") if result.get("top3") else None,
-                          json.dumps({"split_parent_id": parent_id})))
+                         (child_id, "suggested", "system", selected_department(result),
+                          json.dumps({"split_parent_id": parent_id, "abstained": bool(result.get("abstained", True)),
+                                      "extracted_issue_evidence": rec.get("issue_evidence", [])})))
         conn.execute("INSERT INTO ledger (complaint_id,event_type,actor,details) VALUES (?,?,?,?)",
                      (parent_id, "split_confirmed", actor_email or actor_role, json.dumps({"child_ids": ids})))
         conn.commit()
@@ -73,9 +77,11 @@ def confirm_split(parent_id: int, case_id: str, parts: list[dict], actor_role: s
         conn.close()
 
 
-def merge_back(parent_id: int, actor_role: str, actor_email: str | None = None) -> int:
+def merge_back(parent_id: int, actor_role: str, actor_email: str | None = None,
+               actor_user: dict | None = None) -> int:
     """Deactivate current child views but preserve all child records and ledger history."""
     enforce_rbac(actor_role, "can_review")
+    authorize_staff_complaint(actor_role, parent_id, actor_user)
     conn = get_conn()
     try:
         conn.execute("BEGIN IMMEDIATE")

@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .auth import enforce_rbac
+from .geo import authorize_staff_complaint, scoped_complaint_ids
+from .geo import STAFF_ROLES
 from .db import fetch_all, get_conn
 
 _TOKEN = re.compile(r"[\w\u0900-\u097f]+", re.UNICODE)
@@ -13,6 +15,13 @@ _STOP = {"the", "and", "for", "near", "this", "that", "with", "from", "road", "a
          "has", "have", "been", "is", "are", "was", "were", "mein", "me", "hai", "hain",
          "pe", "par", "ki", "ka", "ke", "और", "है", "हैं", "में", "पर", "की", "का", "के"}
 DECISIONS = {"same_incident", "related", "different", "needs_info", "unlink"}
+DECISION_REASON_CODES = {
+    "same_incident": "same_incident",
+    "related": "related_not_duplicate",
+    "different": "different_incident",
+    "needs_info": "insufficient_information",
+    "unlink": "reopen_after_review",
+}
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "duplicate_threshold.json"
 DEFAULT_CONFIG = {
     "threshold": 0.55,
@@ -111,6 +120,22 @@ def compare_pair(text_a, text_b, location_a="unknown", location_b="unknown",
     }
 
 
+def candidate_outcome(evidence, config=None):
+    """Describe a review candidate; this label never links or suppresses a case."""
+    config = config or load_duplicate_config()
+    threshold = float(config["threshold"])
+    score = float(evidence.get("score", 0.0))
+    if score >= threshold and not evidence.get("hard_conflict"):
+        return "likely same"
+    if evidence.get("hard_conflict"):
+        return "distinct"
+    if score >= threshold * 0.55:
+        return "related"
+    if evidence.get("missing_fields"):
+        return "insufficient evidence"
+    return "distinct"
+
+
 def _latest_decision(a, b):
     rows = fetch_all(
         "SELECT decision FROM duplicate_reviews WHERE "
@@ -128,11 +153,18 @@ def _latest_link(a, b):
     return rows[0] if rows else {"incident_id": None, "active": 0}
 
 
-def find_candidates(complaint_id: int, limit: int = 10, time_window_days: int | None = None):
+def find_candidates(complaint_id: int, limit: int = 10, time_window_days: int | None = None,
+                    actor_user: dict | None = None):
     config = load_duplicate_config()
     window = config.get("time_window_days", 7) if time_window_days is None else time_window_days
     if window < 0:
         raise ValueError("The candidate time window cannot be negative.")
+    permitted = None
+    if actor_user and actor_user.get("role") in STAFF_ROLES:
+        authorize_staff_complaint(actor_user["role"], complaint_id, actor_user)
+        permitted = set(scoped_complaint_ids(actor_user, include_unassigned=True))
+        if int(complaint_id) not in permitted:
+            raise PermissionError("This complaint is outside your department or verified service area.")
     source_rows = fetch_all("SELECT * FROM complaints WHERE id=? AND is_active=1", (complaint_id,))
     if not source_rows:
         raise ValueError("Complaint not found.")
@@ -140,7 +172,16 @@ def find_candidates(complaint_id: int, limit: int = 10, time_window_days: int | 
     source_words = _tokens(source.get("normalized_text") or source["original_text"])
     source_location = (source.get("location") or "unknown").strip().casefold()
     source_date = _date(source.get("created_at"))
-    rows = fetch_all("SELECT * FROM complaints WHERE id<>? AND is_active=1 ORDER BY id DESC", (complaint_id,))
+    if permitted is None:
+        rows = fetch_all("SELECT * FROM complaints WHERE id<>? AND is_active=1 ORDER BY id DESC", (complaint_id,))
+    else:
+        other_ids = sorted(permitted - {int(complaint_id)})
+        if not other_ids:
+            rows = []
+        else:
+            marks = ",".join("?" for _ in other_ids)
+            rows = fetch_all(f"SELECT * FROM complaints WHERE id<>? AND is_active=1 AND id IN ({marks}) "
+                             "ORDER BY id DESC", [complaint_id, *other_ids])
     candidates = []
     for row in rows:
         words = _tokens(row.get("normalized_text") or row["original_text"])
@@ -160,6 +201,7 @@ def find_candidates(complaint_id: int, limit: int = 10, time_window_days: int | 
             "original_text": row["original_text"], "location": row.get("location") or "unknown",
             "created_at": row.get("created_at"), "text_score": round(text_score, 4),
             **evidence,
+            "candidate_outcome": candidate_outcome(evidence, config),
             "decision": _latest_decision(complaint_id, row["id"]),
             "active_link": bool(link["active"]), "incident_id": link["incident_id"] if link["active"] else None,
         })
@@ -168,14 +210,20 @@ def find_candidates(complaint_id: int, limit: int = 10, time_window_days: int | 
 
 
 def record_decision(complaint_id: int, candidate_id: int, decision: str, actor_role: str,
-                    reason: str, actor_email: str | None = None):
+                    reason: str, actor_email: str | None = None, reason_code: str | None = None,
+                    actor_user: dict | None = None):
     enforce_rbac(actor_role, "can_review")
+    authorize_staff_complaint(actor_role, complaint_id, actor_user)
+    authorize_staff_complaint(actor_role, candidate_id, actor_user)
     if decision not in DECISIONS:
         raise ValueError(f"Decision must be one of: {', '.join(sorted(DECISIONS))}.")
     if complaint_id == candidate_id:
         raise ValueError("A complaint cannot be linked to itself.")
     if not (reason or "").strip():
         raise ValueError("A reason is required for every duplicate decision.")
+    expected_reason_code = DECISION_REASON_CODES[decision]
+    if reason_code != expected_reason_code:
+        raise ValueError(f"Decision '{decision}' requires reason code '{expected_reason_code}'.")
     ids = sorted((int(complaint_id), int(candidate_id)))
     conn = get_conn()
     try:
@@ -184,8 +232,9 @@ def record_decision(complaint_id: int, candidate_id: int, decision: str, actor_r
             raise ValueError("Both complaints must exist.")
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
-            "INSERT INTO duplicate_reviews (complaint_id,candidate_complaint_id,decision,actor,reason) "
-            "VALUES (?,?,?,?,?)", (ids[0], ids[1], decision, actor_email or actor_role, reason.strip()))
+            "INSERT INTO duplicate_reviews (complaint_id,candidate_complaint_id,decision,actor,reason,reason_code) "
+            "VALUES (?,?,?,?,?,?)", (ids[0], ids[1], decision, actor_email or actor_role,
+                                      reason.strip(), reason_code))
         if decision in {"same_incident", "unlink"}:
             latest_link = conn.execute(
                 "SELECT incident_id,active FROM incident_links WHERE complaint_id=? AND candidate_complaint_id=? "
